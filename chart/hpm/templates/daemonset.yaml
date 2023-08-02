@@ -41,6 +41,36 @@ spec:
       {{- else }}
       serviceAccountName: vc-{{ .Values.VclusterReleaseName }}
       {{- end }}
+      {{- if not .Values.hostpathMapper.dev }}
+      initContainers:
+      - name: hostpath-mapper-init
+        {{- if .Values.hostpathMapper.image }}
+        image: "{{ .Values.hostpathMapper.image }}"
+        {{- else }}
+        image: "{{ .Values.defaultImageRegistry }}ghcr.io/loft-sh/vcluster-hpm:{{ .Chart.Version }}"
+        {{- end }}
+        {{- if .Values.hostpathMapper.workingDir }}
+        workingDir: {{ .Values.hostpathMapper.workingDir }}
+        {{- end }}
+        command:
+          - /vcluster-hpm
+        env:
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: VCLUSTER_HOSTPATH_MAPPER_CURRENT_NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+        args:
+          - --name={{ .Values.VclusterReleaseName }}
+          - --target-namespace={{ .Release.Namespace }}
+          - --init=true
+        volumeMounts:
+          - name: kubeconfig
+            mountPath: /data/server/tls
+      {{- end }}
       containers:
       - name: hostpath-mapper
         {{- if .Values.hostpathMapper.image }}
@@ -54,6 +84,10 @@ spec:
         command:
           - /vcluster-hpm
         env:
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
           - name: VCLUSTER_HOSTPATH_MAPPER_CURRENT_NODE_NAME
             valueFrom:
               fieldRef:

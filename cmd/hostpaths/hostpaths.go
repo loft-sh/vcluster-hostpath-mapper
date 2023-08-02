@@ -22,10 +22,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -41,6 +43,8 @@ func init() {
 	_ = clientgoscheme.AddToScheme(scheme)
 }
 
+type key int
+
 const (
 	LogsMountPath    = "/var/log"
 	PodLogsMountPath = "/var/log/pods"
@@ -50,7 +54,48 @@ const (
 
 	// naming format <pod_name>_<namespace>_<container_name>-<containerdID(hash, with <docker/cri>:// prefix removed)>.log
 	ContainerSymlinkSourceTemplate = "%s_%s_%s-%s.log"
+
+	MultiNamespaceMode = "multi-namespace-mode"
+	SyncerContainer    = "syncer"
+
+	optionsKey key = iota
+
+	PodNameEnv = "POD_NAME"
 )
+
+// map of physical pod names to the corresponding virtual pod
+type PhysicalPodMap map[string]*PodDetail
+
+type PodDetail struct {
+	Target      string
+	SymLinkName *string
+	PhysicalPod corev1.Pod
+}
+
+func NewHostpathMapperCommand() *cobra.Command {
+	options := &context2.VirtualClusterOptions{}
+	init := false
+
+	cmd := &cobra.Command{
+		Use:   "start",
+		Short: "Map host to virtual pod logs",
+		Args:  cobra.NoArgs,
+		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			return Start(cobraCmd.Context(), options, init)
+		},
+	}
+
+	cmd.Flags().StringVar(&options.ClientCaCert, "client-ca-cert", "/data/server/tls/client-certificate", "The path to the client ca certificate")
+	cmd.Flags().StringVar(&options.ServerCaCert, "server-ca-cert", "/data/server/tls/certificate-authority", "The path to the server ca certificate")
+	cmd.Flags().StringVar(&options.ServerCaKey, "server-ca-key", "/data/server/tls/client-key", "The path to the server ca key")
+
+	cmd.Flags().StringVar(&options.TargetNamespace, "target-namespace", "", "The namespace to run the virtual cluster in (defaults to current namespace)")
+
+	cmd.Flags().StringVar(&options.Name, "name", "vcluster", "The name of the virtual cluster")
+	cmd.Flags().BoolVar(&init, "init", false, "If this is the init container")
+
+	return cmd
+}
 
 func podNodeIndexer(obj client.Object) []string {
 	res := []string{}
@@ -62,44 +107,7 @@ func podNodeIndexer(obj client.Object) []string {
 	return res
 }
 
-// map of physical pod names to the corresponding virtual pod
-type PhysicalPodMap map[string]*PodDetail
-
-type PodDetail struct {
-	Target      string
-	SymLinkName *string
-	PhysicalPod corev1.Pod
-}
-
-type key int
-
-const (
-	optionsKey key = iota
-)
-
-func NewHostpathMapperCommand() *cobra.Command {
-	options := &context2.VirtualClusterOptions{}
-	cmd := &cobra.Command{
-		Use:   "start",
-		Short: "Map host to virtual pod logs",
-		Args:  cobra.NoArgs,
-		RunE: func(cobraCmd *cobra.Command, args []string) error {
-			return MapHostPaths(cobraCmd.Context(), options)
-		},
-	}
-
-	cmd.Flags().StringVar(&options.ClientCaCert, "client-ca-cert", "/data/server/tls/client-certificate", "The path to the client ca certificate")
-	cmd.Flags().StringVar(&options.ServerCaCert, "server-ca-cert", "/data/server/tls/certificate-authority", "The path to the server ca certificate")
-	cmd.Flags().StringVar(&options.ServerCaKey, "server-ca-key", "/data/server/tls/client-key", "The path to the server ca key")
-
-	cmd.Flags().StringVar(&options.TargetNamespace, "target-namespace", "", "The namespace to run the virtual cluster in (defaults to current namespace)")
-
-	cmd.Flags().StringVar(&options.Name, "name", "vcluster", "The name of the virtual cluster")
-
-	return cmd
-}
-
-func MapHostPaths(ctx context.Context, options *context2.VirtualClusterOptions) error {
+func Start(ctx context.Context, options *context2.VirtualClusterOptions, init bool) error {
 	// get current namespace
 	currentNamespace, err := clienthelper.CurrentNamespace()
 	if err != nil {
@@ -110,20 +118,12 @@ func MapHostPaths(ctx context.Context, options *context2.VirtualClusterOptions) 
 	if options.TargetNamespace == "" {
 		options.TargetNamespace = currentNamespace
 	}
-	translate.Default = translate.NewSingleNamespaceTranslator(options.TargetNamespace)
 
 	virtualPath := fmt.Sprintf(podtranslate.VirtualPathTemplate, options.TargetNamespace, options.Name)
 	options.VirtualKubeletPodPath = filepath.Join(virtualPath, "kubelet", "pods")
 	options.VirtualLogsPath = filepath.Join(virtualPath, "log")
 	options.VirtualPodLogsPath = filepath.Join(options.VirtualLogsPath, "pods")
 	options.VirtualContainerLogsPath = filepath.Join(options.VirtualLogsPath, "containers")
-	err = os.Mkdir(options.VirtualContainerLogsPath, os.ModeDir)
-	if err != nil {
-		if !os.IsExist(err) {
-			klog.Errorf("error creating container dir in log path: %v", err)
-			return err
-		}
-	}
 
 	inClusterConfig := ctrl.GetConfigOrDie()
 
@@ -191,7 +191,110 @@ func MapHostPaths(ctx context.Context, options *context2.VirtualClusterOptions) 
 	ctx = context.WithValue(ctx, optionsKey, options)
 
 	startManagers(ctx, localManager, virtualClusterManager)
+
+	_, err = findVclusterModeAndSetDefaultTranslation(ctx, localManager, options)
+	if err != nil {
+		return err
+	}
+
+	if init {
+		klog.Info("is init container mode")
+		defer ctx.Done()
+		return restartTargetPods(ctx, options, localManager, virtualClusterManager)
+	}
+
+	klog.Info("mapping hostpaths")
+	err = os.Mkdir(options.VirtualContainerLogsPath, os.ModeDir)
+	if err != nil {
+		if !os.IsExist(err) {
+			klog.Errorf("error creating container dir in log path: %v", err)
+			return err
+		}
+	}
 	mapHostPaths(ctx, localManager, virtualClusterManager)
+	return nil
+}
+
+func findVclusterModeAndSetDefaultTranslation(ctx context.Context, localManager manager.Manager, options *context2.VirtualClusterOptions) (*string, error) {
+	vclusterPod := &corev1.Pod{}
+	err := localManager.GetClient().Get(ctx, types.NamespacedName{
+		Name:      options.Name + "-0",
+		Namespace: options.TargetNamespace,
+	}, vclusterPod)
+
+	if err != nil {
+		return nil, err
+	}
+
+	for _, container := range vclusterPod.Spec.Containers {
+		if container.Name == SyncerContainer {
+			// iterate over command args
+			for _, arg := range container.Args {
+				if strings.Contains(arg, MultiNamespaceMode) {
+					translate.Default = translate.NewMultiNamespaceTranslator(options.TargetNamespace)
+					return pointer.String(MultiNamespaceMode), nil
+				}
+			}
+		}
+	}
+
+	translate.Default = translate.NewSingleNamespaceTranslator(options.TargetNamespace)
+	return nil, nil
+}
+
+func restartTargetPods(ctx context.Context, options *context2.VirtualClusterOptions, localManager, virtualClusterManager manager.Manager) error {
+	pPodList := &corev1.PodList{}
+
+	err := localManager.GetClient().List(ctx, pPodList, &client.ListOptions{
+		FieldSelector: fields.SelectorFromSet(fields.Set{
+			NodeIndexName: os.Getenv(HostpathMapperSelfNodeNameEnvVar),
+		}),
+	})
+
+	if err != nil {
+		klog.Errorf("unable to list pods: %v", err)
+		return err
+	}
+
+	podRestartList := []corev1.Pod{}
+
+podLoop:
+	for _, pPod := range pPodList.Items {
+		// skip current pod itself
+		if pPod.Name == os.Getenv(PodNameEnv) {
+			klog.Infof("skipping self pod %s", pPod.Name)
+			continue
+		}
+
+		klog.Infof("processing pod %s", pPod.Name)
+
+		for _, volume := range pPod.Spec.Volumes {
+			if volume.VolumeSource.HostPath != nil {
+				if volume.VolumeSource.HostPath.Path == podtranslate.PodLoggingHostPath ||
+					volume.VolumeSource.HostPath.Path == podtranslate.LogHostPath ||
+					volume.VolumeSource.HostPath.Path == podtranslate.KubeletPodPath {
+
+					klog.Infof("adding pod %s to restart list", pPod.Name)
+					podRestartList = append(podRestartList, pPod)
+					continue podLoop
+				}
+			}
+		}
+	}
+
+	klog.Infof("restart list %d", len(podRestartList))
+
+	// translate to physical pod name and delete
+	// this would require us to know wether multinamespace mode or single namespace mode?
+	for _, pPod := range podRestartList {
+		klog.Infof("deleting physical pod %s", pPod.Name)
+
+		err = localManager.GetClient().Delete(ctx, &pPod)
+		if err != nil {
+			klog.Errorf("error deleting target pod %s: %v", pPod.Name, err)
+		}
+	}
+
 	return nil
 }
 
@@ -491,11 +594,6 @@ func checkIfPathExists(path string) (bool, error) {
 }
 
 func startManagers(ctx context.Context, pManager, vManager manager.Manager) {
-	err := pManager.GetFieldIndexer().IndexField(ctx, &corev1.Pod{}, NodeIndexName, podNodeIndexer)
-	if err != nil {
-		panic(err)
-	}
-
 	go func() {
 		err := pManager.Start(ctx)
 		if err != nil {
@@ -503,7 +601,7 @@ func startManagers(ctx context.Context, pManager, vManager manager.Manager) {
 		}
 	}()
 
-	err = vManager.GetFieldIndexer().IndexField(ctx, &corev1.Pod{}, NodeIndexName, podNodeIndexer)
+	err := pManager.GetFieldIndexer().IndexField(ctx, &corev1.Pod{}, NodeIndexName, podNodeIndexer)
 	if err != nil {
 		panic(err)
 	}
@@ -514,6 +612,11 @@ func startManagers(ctx context.Context, pManager, vManager manager.Manager) {
 			panic(err)
 		}
 	}()
+
+	err = vManager.GetFieldIndexer().IndexField(ctx, &corev1.Pod{}, NodeIndexName, podNodeIndexer)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func createPodLogSymlinkToPhysical(vPodDirName, pPodDirName string) (*string, error) {
