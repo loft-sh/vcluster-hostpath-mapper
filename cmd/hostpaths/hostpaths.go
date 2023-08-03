@@ -18,7 +18,9 @@ import (
 	"github.com/loft-sh/vcluster/pkg/util/translate"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -215,18 +217,56 @@ func Start(ctx context.Context, options *context2.VirtualClusterOptions, init bo
 	return nil
 }
 
-func findVclusterModeAndSetDefaultTranslation(ctx context.Context, localManager manager.Manager, options *context2.VirtualClusterOptions) (*string, error) {
-	vclusterPod := &corev1.Pod{}
+func getVclusterObject(ctx context.Context, localManager manager.Manager, vclusterName, vclusterNamespace string, object client.Object) error {
 	err := localManager.GetClient().Get(ctx, types.NamespacedName{
-		Name:      options.Name + "-0",
-		Namespace: options.TargetNamespace,
-	}, vclusterPod)
+		Name:      vclusterName,
+		Namespace: vclusterNamespace,
+	}, object)
+	if err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func getSyncerPodSpec(ctx context.Context, localManager manager.Manager, vclusterName, vclusterNamespace string) (*corev1.PodSpec, error) {
+
+	// try looking for the stateful set first
+	vclusterSts := &appsv1.StatefulSet{}
+
+	err := getVclusterObject(ctx, localManager, vclusterName, vclusterNamespace, vclusterSts)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			// try looking for deployment - in case of eks/k8s
+			vclusterDeploy := &appsv1.Deployment{}
+			err := getVclusterObject(ctx, localManager, vclusterName, vclusterNamespace, vclusterDeploy)
+			if err != nil {
+				if kerrors.IsNotFound(err) {
+					klog.Errorf("could not find vcluster either in statefulset or deployment: %v", err)
+					return nil, err
+				}
+
+				klog.Errorf("error looking for vcluster deployment: %v", err)
+				return nil, err
+			}
+
+			return &vclusterDeploy.Spec.Template.Spec, nil
+		}
+
+		return nil, err
+	}
+
+	return &vclusterSts.Spec.Template.Spec, nil
+
+}
+
+func findVclusterModeAndSetDefaultTranslation(ctx context.Context, localManager manager.Manager, options *context2.VirtualClusterOptions) (*string, error) {
+	vclusterPodSpec, err := getSyncerPodSpec(ctx, localManager, options.Name, options.TargetNamespace)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, container := range vclusterPod.Spec.Containers {
+	for _, container := range vclusterPodSpec.Containers {
 		if container.Name == SyncerContainer {
 			// iterate over command args
 			for _, arg := range container.Args {
