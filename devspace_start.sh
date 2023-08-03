@@ -6,6 +6,7 @@ COLOR_GREEN="\033[0;92m"
 COLOR_RESET="\033[0m"
 
 RUN_CMD="go run -mod vendor cmd/main.go"
+DEBUG_CMD="dlv debug cmd/main.go --listen=0.0.0.0:2345 --api-version=2 --output /tmp/__debug_bin --headless --build-flags=\"-mod=vendor\" -- start"
 
 # Print useful output for user
 echo -e "${COLOR_BLUE}
@@ -35,6 +36,7 @@ if [ -z "$BASH" ]; then export PS1="$ "; fi
 export PATH="./bin:$PATH"
 
 export HISTFILE=/tmp/.bash_history
+history -s $DEBUG_CMD
 history -s $RUN_CMD
 history -a
 

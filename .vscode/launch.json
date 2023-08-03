@@ -1,0 +1,25 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+         {
+          "name": "Debug hpm (localhost:2345)",
+          "type": "go",
+          "request": "attach",
+          "mode": "remote",
+          "debugAdapter": "dlv-dap", // already a default for local debug, it improves e.g. inspection of the maps of interfaces
+          "port": 2345,
+          "host": "localhost",
+          "substitutePath": [
+            {
+              "from": "${workspaceFolder}",
+              "to": "/vcluster-hpm-dev",
+            },
+          ],
+          "showLog": true,
+          //"trace": "verbose", // use for debugging problems with delve (breakpoints not working, etc.)
+        },
+    ]
+}

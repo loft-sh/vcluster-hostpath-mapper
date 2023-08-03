@@ -15,7 +15,7 @@ pipelines:
   deploy:
     run: |-
       ensure_pull_secrets --all                         # 2. Ensure pull secrets
-      build_images --all -t $(git describe --always)    # 3. Build, tag (git commit hash) and push all images (see "images")
+      build_images --all 
       create_deployments --all                          # 4. Deploy Helm charts and manifests specfied as "deployments"
 
 # This is a list of `images` that DevSpace can build for this project
@@ -25,6 +25,7 @@ images:
     image: ${IMAGE}
     dockerfile: ./Dockerfile
     target: builder
+    buildKit: {}
 
 # This is a list of `deployments` that DevSpace can create for this project
 deployments:
@@ -41,7 +42,6 @@ deployments:
           dev: true
           image: ${IMAGE}
         VclusterReleaseName: my-vcluster
-        # onlyTag: ${runtime.images.app.tag}
 
 # This is a list of `dev` containers that are based on the containers created by your deployments
 dev:
@@ -49,7 +49,7 @@ dev:
     # Search for the container that runs this image
     imageSelector: ${IMAGE}
     # Replace the container image with this dev-optimized image (allows to skip image building during development)
-    workingDir: /vcluster-dev-hpm
+    workingDir: /vcluster-hpm-dev
     # devImage: ghcr.io/loft-sh/devspace-containers/go:1.18-alpine
     # Sync files between the local filesystem and the development container
     sync:
