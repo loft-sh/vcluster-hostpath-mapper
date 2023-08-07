@@ -29,7 +29,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
-	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -194,7 +193,7 @@ func Start(ctx context.Context, options *context2.VirtualClusterOptions, init bo
 
 	startManagers(ctx, localManager, virtualClusterManager)
 
-	_, err = findVclusterModeAndSetDefaultTranslation(ctx, localManager, options)
+	err = findVclusterModeAndSetDefaultTranslation(ctx, localManager, options)
 	if err != nil {
 		return err
 	}
@@ -230,7 +229,6 @@ func getVclusterObject(ctx context.Context, localManager manager.Manager, vclust
 }
 
 func getSyncerPodSpec(ctx context.Context, localManager manager.Manager, vclusterName, vclusterNamespace string) (*corev1.PodSpec, error) {
-
 	// try looking for the stateful set first
 	vclusterSts := &appsv1.StatefulSet{}
 
@@ -257,13 +255,12 @@ func getSyncerPodSpec(ctx context.Context, localManager manager.Manager, vcluste
 	}
 
 	return &vclusterSts.Spec.Template.Spec, nil
-
 }
 
-func findVclusterModeAndSetDefaultTranslation(ctx context.Context, localManager manager.Manager, options *context2.VirtualClusterOptions) (*string, error) {
+func findVclusterModeAndSetDefaultTranslation(ctx context.Context, localManager manager.Manager, options *context2.VirtualClusterOptions) error {
 	vclusterPodSpec, err := getSyncerPodSpec(ctx, localManager, options.Name, options.TargetNamespace)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	for _, container := range vclusterPodSpec.Containers {
@@ -272,14 +269,14 @@ func findVclusterModeAndSetDefaultTranslation(ctx context.Context, localManager 
 			for _, arg := range container.Args {
 				if strings.Contains(arg, MultiNamespaceMode) {
 					translate.Default = translate.NewMultiNamespaceTranslator(options.TargetNamespace)
-					return pointer.String(MultiNamespaceMode), nil
+					return nil
 				}
 			}
 		}
 	}
 
 	translate.Default = translate.NewSingleNamespaceTranslator(options.TargetNamespace)
-	return nil, nil
+	return nil
 }
 
 func restartTargetPods(ctx context.Context, options *context2.VirtualClusterOptions, localManager, virtualClusterManager manager.Manager) error {
@@ -313,7 +310,6 @@ podLoop:
 				if volume.VolumeSource.HostPath.Path == podtranslate.PodLoggingHostPath ||
 					volume.VolumeSource.HostPath.Path == podtranslate.LogHostPath ||
 					volume.VolumeSource.HostPath.Path == podtranslate.KubeletPodPath {
-
 					klog.Infof("adding pod %s to restart list", pPod.Name)
 					podRestartList = append(podRestartList, pPod)
 					continue podLoop
@@ -421,7 +417,6 @@ func mapHostPaths(ctx context.Context, pManager, vManager manager.Manager) {
 		}
 
 		klog.Infof("successfully reconciled mapper")
-
 	}, time.Second*5)
 }
 
@@ -497,7 +492,6 @@ func cleanupOldPodPath(ctx context.Context, cleanupDirPath string, existingPodPa
 	for _, vPodDirOnDisk := range vPodDirsOnDisk {
 		fullVPodDirDiskPath := filepath.Join(cleanupDirPath, vPodDirOnDisk.Name())
 		if _, ok := existingPodPathsFromAPIServer[fullVPodDirDiskPath]; !ok {
-
 			if cleanupDirPath == options.VirtualKubeletPodPath {
 				// check if the symlinks resolve
 				// this extra check for kubelet is because velero backups
