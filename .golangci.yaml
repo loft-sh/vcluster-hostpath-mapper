@@ -1,0 +1,195 @@
+linters:
+  # We want to gradually introduce new linters to the project
+  disable-all: true
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - decorder
+    - durationcheck
+    - errcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - exportloopref
+    - ginkgolinter
+    - gocheckcompilerdirectives
+    - gocritic
+    - goimports
+    - gosimple
+    - govet
+    - grouper
+    - importas
+    - ineffassign
+    - interfacebloat
+    - makezero
+    - misspell
+    - nakedret
+    - nilnil
+    - prealloc
+    - predeclared
+    - promlinter
+    - revive
+    - staticcheck
+    - stylecheck
+    - tagalign
+    - typecheck
+    - unconvert
+    - unused
+    - usestdlibvars
+    - whitespace
+
+    # linters to be enabled in the distant future:
+    # - cyclop
+    # - dupl
+    # - funlen
+    # - wrapcheck
+
+linters-settings:
+  gocritic:
+    settings:
+      ifElseChain:
+        minThreshold: 5
+
+  exhaustive:
+    check:
+      - switch
+      - map
+    ignore-enum-types: "ResourceName|Atom"
+
+  # goimports:
+  #   local-prefixes: github.com/loft-sh
+
+  importas:
+    no-unaliased: true
+    alias:
+      # Kubernetes
+      - pkg: k8s\.io/api/(\w+)/(v[\w\d]+)
+        alias: $1$2
+      - pkg: k8s\.io/apimachinery/pkg/api/(\w+)/(v[\w\d]+)
+        alias: $1$2
+      - pkg: k8s.io/apimachinery/pkg/api/errors
+        alias: kerrors
+      - pkg: k8s.io/apimachinery/pkg/apis/meta/internalversion
+        alias: metainternalversion
+      # Loft
+      - pkg: github\.com/loft-sh/api/v3/pkg/apis/(\w+)/(v[\w\d]+)
+        alias: $1$2
+      - pkg: github.com/loft-sh/apimachinery/v3/pkg/constants
+        alias: apimachineryconstants
+      - pkg: github.com/loft-sh/pkg/config
+        alias: loftconfig
+      # Agent
+      # Enable this one in the future:
+      # - pkg: github\.com/loft-sh/agentapi/v3/pkg/apis/loft/(\w+)/(v[\w\d]+)
+      #   alias: agent$1$2
+      - pkg: github.com/loft-sh/agentapi/v3/pkg/apis/loft/storage/v1
+        alias: agentstoragev1
+      - pkg: github.com/loft-sh/agentapi/v3/pkg/apis/loft/cluster/v1
+        alias: clusterv1
+      - pkg: github.com/loft-sh/agent/v3/pkg/config
+        alias: agentconfig
+
+  govet:
+    enable:
+      - assign
+      - atomic
+      - atomicalign
+      - bools
+      - buildtag
+      - composites
+      - copylocks
+      - deepequalerrors
+      - errorsas
+      # - fieldalignment
+      - findcall
+      - framepointer
+      - httpresponse
+      - ifaceassert
+      - loopclosure
+      - lostcancel
+      - nilfunc
+      - sortslice
+      - stdmethods
+      - stringintconv
+      - structtag
+      - testinggoroutine
+      - tests
+      - unmarshal
+      - unreachable
+      - unusedresult
+
+  tagalign:
+    order:
+      - json
+      - yaml
+      - xml
+      - form
+
+  revive:
+    rules:
+      - name: atomic
+        disabled: false
+      - name: blank-imports
+        disabled: false
+      - name: context-as-argument
+        disabled: false
+      - name: context-keys-type
+        disabled: false
+      - name: datarace
+        disabled: false
+      - name: defer
+        disabled: false
+      - name: dot-imports
+        disabled: false
+      - name: error-return
+        disabled: false
+      - name: error-strings
+        disabled: false
+      - name: error-naming
+        disabled: false
+      - name: exported
+        disabled: false
+      - name: if-return
+        disabled: false
+      - name: increment-decrement
+        disabled: false
+      - name: var-naming
+        disabled: false
+      - name: var-declaration
+        disabled: false
+      - name: package-comments
+        disabled: false
+      - name: range
+        disabled: false
+      - name: receiver-naming
+        disabled: false
+      - name: time-naming
+        disabled: false
+      - name: unexported-return
+        disabled: false
+      - name: indent-error-flow
+        disabled: false
+      - name: errorf
+        disabled: false
+      - name: empty-block
+        disabled: false
+      - name: superfluous-else
+        disabled: false
+      - name: struct-tag
+        disabled: false
+        arguments:
+          - "json,inline"
+      - name: unused-parameter
+        disabled: true
+      - name: unreachable-code
+        disabled: false
+      - name: redefines-builtin-id
+        disabled: false
+
+issues:
+  # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
+  max-issues-per-linter: 0
+  # Maximum count of issues with the same text. Set to 0 to disable. Default is 3.
+  max-same-issues: 0
