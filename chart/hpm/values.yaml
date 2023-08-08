@@ -11,3 +11,9 @@ hostpathMapper:
     #   memory: 50Mi
 
 serviceAccount: {}
+# Node selectors to use for the hostpathMapper
+nodeSelector: {}
+# Affinity to use for the hostpathMapper
+affinity: {}
+# Tolerations to use for the hostpathMapper
+tolerations: [] 
