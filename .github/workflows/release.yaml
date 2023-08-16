@@ -26,8 +26,8 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: |
-            loftsh/vcluster-hostpath-mapper
-            ghcr.io/loft-sh/vcluster-hostpath-mapper
+            loftsh/vcluster-hpm
+            ghcr.io/loft-sh/vcluster-hpm
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest
@@ -59,10 +59,10 @@ jobs:
         run: echo ${{ steps.docker_build.outputs.digest }}
       - name: Sign Container DockerHub Image
         run: |
-          COSIGN_EXPERIMENTAL=1 cosign sign --yes loftsh/vcluster-hostpath-mapper@${{ steps.docker_build.outputs.digest }}
+          COSIGN_EXPERIMENTAL=1 cosign sign --yes loftsh/vcluster-hpm@${{ steps.docker_build.outputs.digest }}
       - name: Sign Container ghcr.io Image
         run: |
-          COSIGN_EXPERIMENTAL=1 cosign sign --yes ghcr.io/loft-sh/vcluster-hostpath-mapper@${{ steps.docker_build.outputs.digest }}
+          COSIGN_EXPERIMENTAL=1 cosign sign --yes ghcr.io/loft-sh/vcluster-hpm@${{ steps.docker_build.outputs.digest }}
   publish-chart:
     if: startsWith(github.ref, 'refs/tags/v') == true
     needs: [publish-hpm-image]

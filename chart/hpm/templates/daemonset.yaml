@@ -59,7 +59,7 @@ spec:
         {{- if .Values.hostpathMapper.image }}
         image: "{{ .Values.hostpathMapper.image }}"
         {{- else }}
-        image: "{{ .Values.defaultImageRegistry }}ghcr.io/loft-sh/vcluster-hostpath-mapper:{{ .Chart.Version }}"
+        image: "{{ .Values.defaultImageRegistry }}ghcr.io/loft-sh/vcluster-hpm:{{ .Chart.Version }}"
         {{- end }}
         {{- if .Values.hostpathMapper.workingDir }}
         workingDir: {{ .Values.hostpathMapper.workingDir }}
@@ -88,7 +88,7 @@ spec:
         {{- if .Values.hostpathMapper.image }}
         image: "{{ .Values.hostpathMapper.image }}"
         {{- else }}
-        image: "{{ .Values.defaultImageRegistry }}ghcr.io/loft-sh/vcluster-hostpath-mapper:{{ .Chart.Version }}"
+        image: "{{ .Values.defaultImageRegistry }}ghcr.io/loft-sh/vcluster-hpm:{{ .Chart.Version }}"
         {{- end }}
         {{- if .Values.hostpathMapper.workingDir }}
         workingDir: {{ .Values.hostpathMapper.workingDir }}

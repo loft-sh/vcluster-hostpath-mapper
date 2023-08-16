@@ -20,8 +20,9 @@ Now that the vcluster itself is ready, we can deploy the hostpath mapper compone
 
 To sum up, if your vcluster is named `my-vcluster` and is deployed in namespace `my-namespace` then you should run
 ```shell
-helm install vcluster-hpm vcluster-hostpath-mapper \
-    --repo https://charts.loft.sh \
+helm install vcluster-hpm vcluster-hpm \
+    --devel \                         # since we currently only have a beta release
+    --repo https://charts.loft.sh \   # once we publish a GA chart this would not be needed
     -n my-namespace \
     --set VclusterReleaseName=my-vcluster
 ```
