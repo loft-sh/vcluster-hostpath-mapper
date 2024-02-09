@@ -156,6 +156,7 @@ github.com/liggitt/tabwriter
 github.com/loft-sh/vcluster/cmd/vcluster/context
 github.com/loft-sh/vcluster/pkg/constants
 github.com/loft-sh/vcluster/pkg/controllers/resources/configmaps
+github.com/loft-sh/vcluster/pkg/controllers/resources/namespaces
 github.com/loft-sh/vcluster/pkg/controllers/resources/pods/translate
 github.com/loft-sh/vcluster/pkg/controllers/resources/priorityclasses
 github.com/loft-sh/vcluster/pkg/controllers/syncer

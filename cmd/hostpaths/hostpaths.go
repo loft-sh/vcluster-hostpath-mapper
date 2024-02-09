@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/loft-sh/vcluster/pkg/controllers/resources/namespaces"
 	podtranslate "github.com/loft-sh/vcluster/pkg/controllers/resources/pods/translate"
 	"github.com/loft-sh/vcluster/pkg/util/clienthelper"
 
@@ -18,13 +19,12 @@ import (
 	"github.com/loft-sh/vcluster/pkg/util/translate"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -148,7 +148,7 @@ func Start(ctx context.Context, options *context2.VirtualClusterOptions, init bo
 
 		kubeClient, err := kubernetes.NewForConfig(virtualClusterConfig)
 		if err != nil {
-			return false, errors.Wrap(err, "create kube client")
+			return false, fmt.Errorf("create kube client: %w", err)
 		}
 
 		_, err = kubeClient.Discovery().ServerVersion()
@@ -168,13 +168,17 @@ func Start(ctx context.Context, options *context2.VirtualClusterOptions, init bo
 		return err
 	}
 
-	localManager, err := ctrl.NewManager(inClusterConfig, ctrl.Options{
-		Scheme:             scheme,
-		MetricsBindAddress: "0",
-		LeaderElection:     false,
-		Namespace:          options.TargetNamespace,
-		NewClient:          pluginhookclient.NewPhysicalPluginClientFactory(blockingcacheclient.NewCacheClient),
-	})
+	kubeClient, err := kubernetes.NewForConfig(inClusterConfig)
+	if err != nil {
+		return fmt.Errorf("create kube client: %w", err)
+	}
+
+	err = findVclusterModeAndSetDefaultTranslation(ctx, kubeClient, options)
+	if err != nil {
+		return fmt.Errorf("find vcluster mode: %w", err)
+	}
+
+	localManager, err := ctrl.NewManager(inClusterConfig, localManagerCtrlOptions(options))
 	if err != nil {
 		return err
 	}
@@ -192,11 +196,6 @@ func Start(ctx context.Context, options *context2.VirtualClusterOptions, init bo
 	ctx = context.WithValue(ctx, optionsKey, options)
 
 	startManagers(ctx, localManager, virtualClusterManager)
-
-	err = findVclusterModeAndSetDefaultTranslation(ctx, localManager, options)
-	if err != nil {
-		return err
-	}
 
 	if init {
 		klog.Info("is init container mode")
@@ -216,49 +215,46 @@ func Start(ctx context.Context, options *context2.VirtualClusterOptions, init bo
 	return nil
 }
 
-func getVclusterObject(ctx context.Context, localManager manager.Manager, vclusterName, vclusterNamespace string, object client.Object) error {
-	err := localManager.GetClient().Get(ctx, types.NamespacedName{
-		Name:      vclusterName,
-		Namespace: vclusterNamespace,
-	}, object)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func getSyncerPodSpec(ctx context.Context, localManager manager.Manager, vclusterName, vclusterNamespace string) (*corev1.PodSpec, error) {
+func getSyncerPodSpec(ctx context.Context, kubeClient kubernetes.Interface, vclusterName, vclusterNamespace string) (*corev1.PodSpec, error) {
 	// try looking for the stateful set first
-	vclusterSts := &appsv1.StatefulSet{}
 
-	err := getVclusterObject(ctx, localManager, vclusterName, vclusterNamespace, vclusterSts)
-	if err != nil {
+	vclusterSts, err := kubeClient.AppsV1().StatefulSets(vclusterNamespace).Get(ctx, vclusterName, metav1.GetOptions{})
+	if kerrors.IsNotFound(err) {
+		// try looking for deployment - in case of eks/k8s
+		vclusterDeploy, err := kubeClient.AppsV1().Deployments(vclusterNamespace).Get(ctx, vclusterName, metav1.GetOptions{})
 		if kerrors.IsNotFound(err) {
-			// try looking for deployment - in case of eks/k8s
-			vclusterDeploy := &appsv1.Deployment{}
-			err := getVclusterObject(ctx, localManager, vclusterName, vclusterNamespace, vclusterDeploy)
-			if err != nil {
-				if kerrors.IsNotFound(err) {
-					klog.Errorf("could not find vcluster either in statefulset or deployment: %v", err)
-					return nil, err
-				}
-
-				klog.Errorf("error looking for vcluster deployment: %v", err)
-				return nil, err
-			}
-
-			return &vclusterDeploy.Spec.Template.Spec, nil
+			klog.Errorf("could not find vcluster either in statefulset or deployment: %v", err)
+			return nil, err
+		} else if err != nil {
+			klog.Errorf("error looking for vcluster deployment: %v", err)
+			return nil, err
 		}
 
+		return &vclusterDeploy.Spec.Template.Spec, nil
+	} else if err != nil {
 		return nil, err
 	}
 
 	return &vclusterSts.Spec.Template.Spec, nil
 }
 
-func findVclusterModeAndSetDefaultTranslation(ctx context.Context, localManager manager.Manager, options *context2.VirtualClusterOptions) error {
-	vclusterPodSpec, err := getSyncerPodSpec(ctx, localManager, options.Name, options.TargetNamespace)
+func localManagerCtrlOptions(options *context2.VirtualClusterOptions) manager.Options {
+	controllerOptions := ctrl.Options{
+		Scheme:             scheme,
+		MetricsBindAddress: "0",
+		LeaderElection:     false,
+		NewClient:          pluginhookclient.NewPhysicalPluginClientFactory(blockingcacheclient.NewCacheClient),
+	}
+
+	if !options.MultiNamespaceMode {
+		controllerOptions.Cache.Namespaces = []string{options.TargetNamespace}
+	}
+
+	return controllerOptions
+}
+
+func findVclusterModeAndSetDefaultTranslation(ctx context.Context, kubeClient kubernetes.Interface, options *context2.VirtualClusterOptions) error {
+	vclusterPodSpec, err := getSyncerPodSpec(ctx, kubeClient, options.Name, options.TargetNamespace)
 	if err != nil {
 		return err
 	}
@@ -268,6 +264,7 @@ func findVclusterModeAndSetDefaultTranslation(ctx context.Context, localManager 
 			// iterate over command args
 			for _, arg := range container.Args {
 				if strings.Contains(arg, MultiNamespaceMode) {
+					options.MultiNamespaceMode = true
 					translate.Default = translate.NewMultiNamespaceTranslator(options.TargetNamespace)
 					return nil
 				}
@@ -338,21 +335,11 @@ func mapHostPaths(ctx context.Context, pManager, vManager manager.Manager) {
 	options := ctx.Value(optionsKey).(*context2.VirtualClusterOptions)
 
 	wait.Forever(func() {
-		podList := &corev1.PodList{}
-		err := pManager.GetClient().List(ctx, podList, &client.ListOptions{
-			Namespace: options.TargetNamespace,
-			FieldSelector: fields.SelectorFromSet(fields.Set{
-				NodeIndexName: os.Getenv(HostpathMapperSelfNodeNameEnvVar),
-			}),
-		})
+		podMappings, err := getPhysicalPodMap(ctx, options, pManager)
 		if err != nil {
-			klog.Errorf("unable to list pods: %v", err)
+			klog.Errorf("unable to get physical pod mapping: %v", err)
 			return
 		}
-
-		podMappings := make(PhysicalPodMap)
-
-		fillUpPodMapping(ctx, podList, podMappings)
 
 		vPodList := &corev1.PodList{}
 		err = vManager.GetClient().List(ctx, vPodList, &client.ListOptions{
@@ -418,6 +405,75 @@ func mapHostPaths(ctx context.Context, pManager, vManager manager.Manager) {
 
 		klog.Infof("successfully reconciled mapper")
 	}, time.Second*5)
+}
+
+func getPhysicalPodMap(ctx context.Context, options *context2.VirtualClusterOptions, pManager manager.Manager) (PhysicalPodMap, error) {
+	podListOptions := &client.ListOptions{
+		FieldSelector: fields.SelectorFromSet(fields.Set{
+			NodeIndexName: os.Getenv(HostpathMapperSelfNodeNameEnvVar),
+		}),
+	}
+
+	if !options.MultiNamespaceMode {
+		podListOptions.Namespace = options.TargetNamespace
+	}
+
+	podList := &corev1.PodList{}
+	err := pManager.GetClient().List(ctx, podList, podListOptions)
+	if err != nil {
+		return nil, fmt.Errorf("unable to list pods: %w", err)
+	}
+
+	var pods []corev1.Pod
+	if options.MultiNamespaceMode {
+		// find namespaces managed by the current vcluster
+		nsList := &corev1.NamespaceList{}
+		err = pManager.GetClient().List(ctx, nsList, &client.ListOptions{
+			LabelSelector: labels.SelectorFromSet(labels.Set{
+				namespaces.VclusterNamespaceAnnotation: options.TargetNamespace,
+			}),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("unable to list namespaces: %w", err)
+		}
+
+		vclusterNamespaces := make(map[string]struct{}, len(nsList.Items))
+		for _, ns := range nsList.Items {
+			vclusterNamespaces[ns.Name] = struct{}{}
+		}
+
+		// Limit Pods
+		pods = make([]corev1.Pod, 0, len(podList.Items))
+		for _, pod := range podList.Items {
+			if _, ok := vclusterNamespaces[pod.Namespace]; ok {
+				pods = append(pods, pod)
+			}
+		}
+	} else {
+		pods = podList.Items
+	}
+
+	podMappings := make(PhysicalPodMap, len(pods))
+	for _, pPod := range pods {
+		lookupName := fmt.Sprintf("%s_%s_%s", pPod.Namespace, pPod.Name, pPod.UID)
+
+		ok, err := checkIfPathExists(lookupName)
+		if err != nil {
+			klog.Errorf("error checking existence for path %s: %v", lookupName, err)
+		}
+
+		if ok {
+			// check entry in podMapping
+			if _, ok := podMappings[pPod.Name]; !ok {
+				podMappings[pPod.Name] = &PodDetail{
+					Target:      lookupName,
+					PhysicalPod: pPod,
+				}
+			}
+		}
+	}
+
+	return podMappings, nil
 }
 
 func cleanupOldContainerPaths(ctx context.Context, existingVPodsWithNS map[string]bool) error {
@@ -589,27 +645,6 @@ func getPhysicalLogFilename(ctx context.Context, physicalContainerFileName strin
 	fileName := splits[len(splits)-1]
 
 	return fileName, nil
-}
-
-func fillUpPodMapping(ctx context.Context, pPodList *corev1.PodList, podMappings PhysicalPodMap) {
-	for _, pPod := range pPodList.Items {
-		lookupName := fmt.Sprintf("%s_%s_%s", pPod.Namespace, pPod.Name, pPod.UID)
-
-		ok, err := checkIfPathExists(lookupName)
-		if err != nil {
-			klog.Errorf("error checking existence for path %s: %v", lookupName, err)
-		}
-
-		if ok {
-			// check entry in podMapping
-			if _, ok := podMappings[pPod.Name]; !ok {
-				podMappings[pPod.Name] = &PodDetail{
-					Target:      lookupName,
-					PhysicalPod: pPod,
-				}
-			}
-		}
-	}
 }
 
 // check if folder exists

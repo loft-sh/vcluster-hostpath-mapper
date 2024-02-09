@@ -1,6 +1,6 @@
 module github.com/loft-sh/vcluster-hostpath-mapper
 
-go 1.20
+go 1.22.0
 
 require (
 	github.com/go-openapi/loads v0.21.2
