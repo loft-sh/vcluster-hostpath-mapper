@@ -443,12 +443,7 @@ func getPhysicalPodMap(ctx context.Context, options *context2.VirtualClusterOpti
 		}
 
 		// Limit Pods
-		pods = make([]corev1.Pod, 0, len(podList.Items))
-		for _, pod := range podList.Items {
-			if _, ok := vclusterNamespaces[pod.Namespace]; ok {
-				pods = append(pods, pod)
-			}
-		}
+		pods = filter(ctx, podList.Items, vclusterNamespaces)
 	} else {
 		pods = podList.Items
 	}
@@ -474,6 +469,17 @@ func getPhysicalPodMap(ctx context.Context, options *context2.VirtualClusterOpti
 	}
 
 	return podMappings, nil
+}
+
+func filter(ctx context.Context, podList []corev1.Pod, vclusterNamespaces map[string]struct{}) []corev1.Pod {
+	pods := make([]corev1.Pod, 0, len(podList))
+	for _, pod := range podList {
+		if _, ok := vclusterNamespaces[pod.Namespace]; ok {
+			pods = append(pods, pod)
+		}
+	}
+
+	return pods
 }
 
 func cleanupOldContainerPaths(ctx context.Context, existingVPodsWithNS map[string]bool) error {

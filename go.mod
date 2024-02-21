@@ -7,6 +7,7 @@ require (
 	github.com/loft-sh/vcluster v0.15.2
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v1.7.0
+	gotest.tools v2.2.0+incompatible
 	k8s.io/api v0.27.4
 	k8s.io/apimachinery v0.27.4
 	k8s.io/client-go v0.27.4
