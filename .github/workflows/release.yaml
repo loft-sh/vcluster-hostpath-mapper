@@ -14,9 +14,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v3
-      - uses: sigstore/cosign-installer@v3.0.5
+      - uses: sigstore/cosign-installer@v3.4.0
         with:
-          cosign-release: "v2.0.2"
+          cosign-release: "v2.2.3"
       - id: get_version
         run: |
           RELEASE_VERSION=$(echo $GITHUB_REF | sed -nE 's!refs/tags/!!p')
@@ -82,3 +82,4 @@ jobs:
           CHART_MUSEUM_URL: "https://charts.loft.sh/"
           CHART_MUSEUM_USER: ${{ secrets.CHART_MUSEUM_USER }}
           CHART_MUSEUM_PASSWORD: ${{ secrets.CHART_MUSEUM_PASSWORD }}
+
