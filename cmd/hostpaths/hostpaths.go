@@ -13,7 +13,8 @@ import (
 	podtranslate "github.com/loft-sh/vcluster/pkg/controllers/resources/pods/translate"
 	"github.com/loft-sh/vcluster/pkg/util/clienthelper"
 
-	context2 "github.com/loft-sh/vcluster/cmd/vcluster/context"
+	"github.com/loft-sh/vcluster/config"
+	"github.com/loft-sh/vcluster/pkg/config/legacyconfig"
 	"github.com/loft-sh/vcluster/pkg/util/blockingcacheclient"
 	"github.com/loft-sh/vcluster/pkg/util/pluginhookclient"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
@@ -27,13 +28,15 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/yaml"
 )
 
 var (
@@ -61,7 +64,9 @@ const (
 
 	optionsKey key = iota
 
-	PodNameEnv = "POD_NAME"
+	PodNameEnv               = "POD_NAME"
+	configSecretNameTemplate = "vc-config-%s"
+	configFilename           = "config.yaml"
 )
 
 // map of physical pod names to the corresponding virtual pod
@@ -73,8 +78,16 @@ type PodDetail struct {
 	PhysicalPod corev1.Pod
 }
 
+type VirtualClusterOptions struct {
+	legacyconfig.LegacyVirtualClusterOptions
+	VirtualLogsPath          string
+	VirtualPodLogsPath       string
+	VirtualContainerLogsPath string
+	VirtualKubeletPodPath    string
+}
+
 func NewHostpathMapperCommand() *cobra.Command {
-	options := &context2.VirtualClusterOptions{}
+	options := &VirtualClusterOptions{}
 	init := false
 
 	cmd := &cobra.Command{
@@ -108,7 +121,7 @@ func podNodeIndexer(obj client.Object) []string {
 	return res
 }
 
-func Start(ctx context.Context, options *context2.VirtualClusterOptions, init bool) error {
+func Start(ctx context.Context, options *VirtualClusterOptions, init bool) error {
 	// get current namespace
 	currentNamespace, err := clienthelper.CurrentNamespace()
 	if err != nil {
@@ -132,7 +145,7 @@ func Start(ctx context.Context, options *context2.VirtualClusterOptions, init bo
 	inClusterConfig.Burst = 80
 	inClusterConfig.Timeout = 0
 
-	translate.Suffix = options.Name
+	translate.VClusterName = options.Name
 
 	var virtualClusterConfig *rest.Config
 	err = wait.PollUntilContextTimeout(ctx, time.Second, time.Hour, true, func(context.Context) (bool, error) {
@@ -184,10 +197,10 @@ func Start(ctx context.Context, options *context2.VirtualClusterOptions, init bo
 	}
 
 	virtualClusterManager, err := ctrl.NewManager(virtualClusterConfig, ctrl.Options{
-		Scheme:             scheme,
-		MetricsBindAddress: "0",
-		LeaderElection:     false,
-		NewClient:          pluginhookclient.NewVirtualPluginClientFactory(blockingcacheclient.NewCacheClient),
+		Scheme:         scheme,
+		Metrics:        metricsserver.Options{BindAddress: "0"},
+		LeaderElection: false,
+		NewClient:      pluginhookclient.NewVirtualPluginClientFactory(blockingcacheclient.NewCacheClient),
 	})
 	if err != nil {
 		return err
@@ -238,22 +251,57 @@ func getSyncerPodSpec(ctx context.Context, kubeClient kubernetes.Interface, vclu
 	return &vclusterSts.Spec.Template.Spec, nil
 }
 
-func localManagerCtrlOptions(options *context2.VirtualClusterOptions) manager.Options {
+func getVclusterConfigFromSecret(ctx context.Context, kubeClient kubernetes.Interface, vclusterName, vclusterNamespace string) (*config.Config, error) {
+	configSecret, err := kubeClient.CoreV1().Secrets(vclusterNamespace).Get(ctx, fmt.Sprintf(configSecretNameTemplate, vclusterName), metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	rawBytes, ok := configSecret.Data[configFilename]
+	if !ok {
+		return nil, fmt.Errorf("key '%s' not found in secret", configFilename)
+	}
+
+	// create a new strict decoder
+	rawConfig := &config.Config{}
+	err = yaml.UnmarshalStrict(rawBytes, rawConfig)
+	if err != nil {
+		klog.Errorf("unmarshal %s: %#+v", configFilename, errors.Unwrap(err))
+		return nil, err
+	}
+
+	return rawConfig, nil
+}
+
+func setMultiNamespaceMode(options *VirtualClusterOptions) {
+	options.MultiNamespaceMode = true
+	translate.Default = translate.NewMultiNamespaceTranslator(options.TargetNamespace)
+}
+
+func localManagerCtrlOptions(options *VirtualClusterOptions) manager.Options {
 	controllerOptions := ctrl.Options{
-		Scheme:             scheme,
-		MetricsBindAddress: "0",
-		LeaderElection:     false,
-		NewClient:          pluginhookclient.NewPhysicalPluginClientFactory(blockingcacheclient.NewCacheClient),
+		Scheme:         scheme,
+		Metrics:        metricsserver.Options{BindAddress: "0"},
+		LeaderElection: false,
+		NewClient:      pluginhookclient.NewPhysicalPluginClientFactory(blockingcacheclient.NewCacheClient),
 	}
 
 	if !options.MultiNamespaceMode {
-		controllerOptions.Cache.Namespaces = []string{options.TargetNamespace}
+		controllerOptions.Cache.DefaultNamespaces = map[string]cache.Config{options.TargetNamespace: {}}
 	}
 
 	return controllerOptions
 }
 
-func findVclusterModeAndSetDefaultTranslation(ctx context.Context, kubeClient kubernetes.Interface, options *context2.VirtualClusterOptions) error {
+func findVclusterModeAndSetDefaultTranslation(ctx context.Context, kubeClient kubernetes.Interface, options *VirtualClusterOptions) error {
+	vClusterConfig, err := getVclusterConfigFromSecret(ctx, kubeClient, options.Name, options.TargetNamespace)
+	if err != nil && !kerrors.IsNotFound(err) {
+		return err
+	} else if vClusterConfig != nil && vClusterConfig.Experimental.MultiNamespaceMode.Enabled {
+		setMultiNamespaceMode(options)
+		return nil
+	}
+
 	vclusterPodSpec, err := getSyncerPodSpec(ctx, kubeClient, options.Name, options.TargetNamespace)
 	if err != nil {
 		return err
@@ -264,8 +312,7 @@ func findVclusterModeAndSetDefaultTranslation(ctx context.Context, kubeClient ku
 			// iterate over command args
 			for _, arg := range container.Args {
 				if strings.Contains(arg, MultiNamespaceMode) {
-					options.MultiNamespaceMode = true
-					translate.Default = translate.NewMultiNamespaceTranslator(options.TargetNamespace)
+					setMultiNamespaceMode(options)
 					return nil
 				}
 			}
@@ -276,7 +323,7 @@ func findVclusterModeAndSetDefaultTranslation(ctx context.Context, kubeClient ku
 	return nil
 }
 
-func restartTargetPods(ctx context.Context, options *context2.VirtualClusterOptions, localManager, virtualClusterManager manager.Manager) error {
+func restartTargetPods(ctx context.Context, options *VirtualClusterOptions, localManager, virtualClusterManager manager.Manager) error {
 	pPodList := &corev1.PodList{}
 
 	err := localManager.GetClient().List(ctx, pPodList, &client.ListOptions{
@@ -332,7 +379,7 @@ podLoop:
 }
 
 func mapHostPaths(ctx context.Context, pManager, vManager manager.Manager) {
-	options := ctx.Value(optionsKey).(*context2.VirtualClusterOptions)
+	options := ctx.Value(optionsKey).(*VirtualClusterOptions)
 
 	wait.Forever(func() {
 		podMappings, err := getPhysicalPodMap(ctx, options, pManager)
@@ -407,7 +454,7 @@ func mapHostPaths(ctx context.Context, pManager, vManager manager.Manager) {
 	}, time.Second*5)
 }
 
-func getPhysicalPodMap(ctx context.Context, options *context2.VirtualClusterOptions, pManager manager.Manager) (PhysicalPodMap, error) {
+func getPhysicalPodMap(ctx context.Context, options *VirtualClusterOptions, pManager manager.Manager) (PhysicalPodMap, error) {
 	podListOptions := &client.ListOptions{
 		FieldSelector: fields.SelectorFromSet(fields.Set{
 			NodeIndexName: os.Getenv(HostpathMapperSelfNodeNameEnvVar),
@@ -430,7 +477,7 @@ func getPhysicalPodMap(ctx context.Context, options *context2.VirtualClusterOpti
 		nsList := &corev1.NamespaceList{}
 		err = pManager.GetClient().List(ctx, nsList, &client.ListOptions{
 			LabelSelector: labels.SelectorFromSet(labels.Set{
-				namespaces.VclusterNamespaceAnnotation: options.TargetNamespace,
+				namespaces.VClusterNamespaceAnnotation: options.TargetNamespace,
 			}),
 		})
 		if err != nil {
@@ -483,7 +530,7 @@ func filter(ctx context.Context, podList []corev1.Pod, vclusterNamespaces map[st
 }
 
 func cleanupOldContainerPaths(ctx context.Context, existingVPodsWithNS map[string]bool) error {
-	options := ctx.Value(optionsKey).(*context2.VirtualClusterOptions)
+	options := ctx.Value(optionsKey).(*VirtualClusterOptions)
 
 	vPodsContainersOnDisk, err := os.ReadDir(options.VirtualContainerLogsPath)
 	if err != nil {
@@ -549,7 +596,7 @@ func cleanupOldPodPath(ctx context.Context, cleanupDirPath string, existingPodPa
 		return err
 	}
 
-	options := ctx.Value(optionsKey).(*context2.VirtualClusterOptions)
+	options := ctx.Value(optionsKey).(*VirtualClusterOptions)
 
 	for _, vPodDirOnDisk := range vPodDirsOnDisk {
 		fullVPodDirDiskPath := filepath.Join(cleanupDirPath, vPodDirOnDisk.Name())
@@ -595,7 +642,7 @@ func cleanupOldPodPath(ctx context.Context, cleanupDirPath string, existingPodPa
 }
 
 func createContainerToPodSymlink(ctx context.Context, vPod corev1.Pod, pPodDetail *PodDetail, targetDir string) {
-	options := ctx.Value(optionsKey).(*context2.VirtualClusterOptions)
+	options := ctx.Value(optionsKey).(*VirtualClusterOptions)
 
 	for _, containerStatus := range vPod.Status.ContainerStatuses {
 		_, containerID, _ := strings.Cut(containerStatus.ContainerID, "://")
@@ -669,6 +716,11 @@ func checkIfPathExists(path string) (bool, error) {
 }
 
 func startManagers(ctx context.Context, pManager, vManager manager.Manager) {
+	err := pManager.GetFieldIndexer().IndexField(ctx, &corev1.Pod{}, NodeIndexName, podNodeIndexer)
+	if err != nil {
+		panic(err)
+	}
+
 	go func() {
 		err := pManager.Start(ctx)
 		if err != nil {
@@ -676,7 +728,7 @@ func startManagers(ctx context.Context, pManager, vManager manager.Manager) {
 		}
 	}()
 
-	err := pManager.GetFieldIndexer().IndexField(ctx, &corev1.Pod{}, NodeIndexName, podNodeIndexer)
+	err = vManager.GetFieldIndexer().IndexField(ctx, &corev1.Pod{}, NodeIndexName, podNodeIndexer)
 	if err != nil {
 		panic(err)
 	}
@@ -687,11 +739,6 @@ func startManagers(ctx context.Context, pManager, vManager manager.Manager) {
 			panic(err)
 		}
 	}()
-
-	err = vManager.GetFieldIndexer().IndexField(ctx, &corev1.Pod{}, NodeIndexName, podNodeIndexer)
-	if err != nil {
-		panic(err)
-	}
 }
 
 func createPodLogSymlinkToPhysical(vPodDirName, pPodDirName string) (*string, error) {

@@ -2,9 +2,9 @@ package priorityclasses
 
 import (
 	"github.com/loft-sh/vcluster/pkg/constants"
-	"github.com/loft-sh/vcluster/pkg/controllers/syncer"
 	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
 	"github.com/loft-sh/vcluster/pkg/controllers/syncer/translator"
+	syncer "github.com/loft-sh/vcluster/pkg/types"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -31,7 +31,7 @@ func (s *priorityClassSyncer) RegisterIndices(ctx *synccontext.RegisterContext) 
 
 var _ syncer.Syncer = &priorityClassSyncer{}
 
-func (s *priorityClassSyncer) SyncDown(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
+func (s *priorityClassSyncer) SyncToHost(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
 	newPriorityClass := s.translate(ctx.Context, vObj.(*schedulingv1.PriorityClass))
 	ctx.Log.Infof("create physical priority class %s", newPriorityClass.Name)
 	err := ctx.PhysicalClient.Create(ctx.Context, newPriorityClass)
@@ -59,7 +59,7 @@ func (s *priorityClassSyncer) Sync(ctx *synccontext.SyncContext, pObj client.Obj
 }
 
 func NewPriorityClassTranslator() translate.PhysicalNameTranslator {
-	return func(vName string, vObj client.Object) string {
+	return func(vName string, _ client.Object) string {
 		return translatePriorityClassName(vName)
 	}
 }

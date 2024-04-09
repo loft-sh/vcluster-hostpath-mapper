@@ -1,18 +1,13 @@
 package namespaces
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/loft-sh/vcluster/pkg/constants"
-	"github.com/loft-sh/vcluster/pkg/controllers/syncer"
 	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
 	"github.com/loft-sh/vcluster/pkg/controllers/syncer/translator"
+	syncertypes "github.com/loft-sh/vcluster/pkg/types"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/validation"
-	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -26,22 +21,21 @@ var excludedAnnotations = []string{
 }
 
 const (
-	VclusterNameAnnotation      = "vcluster.loft.sh/vcluster-name"
-	VclusterNamespaceAnnotation = "vcluster.loft.sh/vcluster-namespace"
+	VClusterNameAnnotation      = "vcluster.loft.sh/vcluster-name"
+	VClusterNamespaceAnnotation = "vcluster.loft.sh/vcluster-namespace"
 )
 
-func New(ctx *synccontext.RegisterContext) (syncer.Object, error) {
-	namespaceLabels, err := parseNamespaceLabels(ctx.Options.NamespaceLabels)
-	if err != nil {
-		return nil, fmt.Errorf("invalid value of the namespace-labels flag: %v", err)
+func New(ctx *synccontext.RegisterContext) (syncertypes.Object, error) {
+	namespaceLabels := map[string]string{}
+	for k, v := range ctx.Config.Experimental.MultiNamespaceMode.NamespaceLabels {
+		namespaceLabels[k] = v
 	}
-
-	namespaceLabels[VclusterNameAnnotation] = ctx.Options.Name
-	namespaceLabels[VclusterNamespaceAnnotation] = ctx.CurrentNamespace
+	namespaceLabels[VClusterNameAnnotation] = ctx.Config.Name
+	namespaceLabels[VClusterNamespaceAnnotation] = ctx.CurrentNamespace
 
 	return &namespaceSyncer{
 		Translator:                 translator.NewClusterTranslator(ctx, "namespace", &corev1.Namespace{}, NamespaceNameTranslator, excludedAnnotations...),
-		workloadServiceAccountName: ctx.Options.ServiceAccount,
+		workloadServiceAccountName: ctx.Config.ControlPlane.Advanced.WorkloadServiceAccount.Name,
 		namespaceLabels:            namespaceLabels,
 	}, nil
 }
@@ -52,7 +46,7 @@ type namespaceSyncer struct {
 	namespaceLabels            map[string]string
 }
 
-var _ syncer.IndicesRegisterer = &namespaceSyncer{}
+var _ syncertypes.IndicesRegisterer = &namespaceSyncer{}
 
 func (s *namespaceSyncer) RegisterIndices(ctx *synccontext.RegisterContext) error {
 	return ctx.VirtualManager.GetFieldIndexer().IndexField(ctx.Context, &corev1.Namespace{}, constants.IndexByPhysicalName, func(rawObj client.Object) []string {
@@ -60,9 +54,9 @@ func (s *namespaceSyncer) RegisterIndices(ctx *synccontext.RegisterContext) erro
 	})
 }
 
-var _ syncer.Syncer = &namespaceSyncer{}
+var _ syncertypes.Syncer = &namespaceSyncer{}
 
-func (s *namespaceSyncer) SyncDown(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
+func (s *namespaceSyncer) SyncToHost(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
 	newNamespace := s.translate(ctx.Context, vObj.(*corev1.Namespace))
 	ctx.Log.Infof("create physical namespace %s", newNamespace.Name)
 	err := ctx.PhysicalClient.Create(ctx.Context, newNamespace)
@@ -105,21 +99,4 @@ func (s *namespaceSyncer) EnsureWorkloadServiceAccount(ctx *synccontext.SyncCont
 
 func NamespaceNameTranslator(vName string, _ client.Object) string {
 	return translate.Default.PhysicalNamespace(vName)
-}
-
-func parseNamespaceLabels(labels []string) (map[string]string, error) {
-	out := map[string]string{}
-	for _, v := range labels {
-		parts := strings.SplitN(v, "=", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("incorrect format, expected: key=value got: %s", v)
-		}
-		out[parts[0]] = parts[1]
-	}
-	errs := validation.ValidateLabels(out, field.NewPath("namespace-labels"))
-	if len(errs) != 0 {
-		return nil, fmt.Errorf("invalid labels: %v", errs)
-	}
-
-	return out, nil
 }
