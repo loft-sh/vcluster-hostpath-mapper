@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	DefaultImage          = "coredns/coredns"
+	DefaultImage          = "coredns/coredns:1.11.0"
 	ManifestRelativePath  = "coredns/coredns.yaml"
 	ManifestsOutputFolder = "/tmp/manifests-to-apply"
 	VarImage              = "IMAGE"
@@ -117,19 +117,19 @@ func GetUserID() int64 {
 }
 
 func processManifestTemplate(vars map[string]interface{}) ([]byte, error) {
-	manifestInputPath := path.Join(constants.ContainerManifestsFolder, ManifestRelativePath)
+	manifestInputPath := path.Join("/manifests", ManifestRelativePath)
 	// check if the manifestInputPath exists
 	if _, err := os.Stat(manifestInputPath); os.IsNotExist(err) {
 		return nil, ErrNoCoreDNSManifests
 	}
 	manifestTemplate, err := template.ParseFiles(manifestInputPath)
 	if err != nil {
-		return nil, fmt.Errorf("unable to parse %s: %v", manifestInputPath, err)
+		return nil, fmt.Errorf("unable to parse %s: %w", manifestInputPath, err)
 	}
 	buf := new(bytes.Buffer)
 	err = manifestTemplate.Execute(buf, vars)
 	if err != nil {
-		return nil, fmt.Errorf("manifestTemplate.Execute failed for manifest %s: %v", manifestInputPath, err)
+		return nil, fmt.Errorf("manifestTemplate.Execute failed for manifest %s: %w", manifestInputPath, err)
 	}
 	return buf.Bytes(), nil
 }

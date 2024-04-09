@@ -19,7 +19,7 @@ func NewClusterTranslator(ctx *context.RegisterContext, name string, obj client.
 		virtualClient:       ctx.VirtualManager.GetClient(),
 		obj:                 obj,
 		nameTranslator:      nameTranslator,
-		syncedLabels:        ctx.Options.SyncLabels,
+		syncedLabels:        ctx.Config.Experimental.SyncSettings.SyncLabels,
 	}
 }
 
@@ -40,27 +40,29 @@ func (n *clusterTranslator) Resource() client.Object {
 	return n.obj.DeepCopyObject().(client.Object)
 }
 
-func (n *clusterTranslator) IsManaged(ctx context2.Context, pObj client.Object) (bool, error) {
+func (n *clusterTranslator) IsManaged(_ context2.Context, pObj client.Object) (bool, error) {
 	return translate.Default.IsManagedCluster(pObj), nil
 }
 
-func (n *clusterTranslator) VirtualToPhysical(_ context2.Context, req types.NamespacedName, vObj client.Object) types.NamespacedName {
+func (n *clusterTranslator) VirtualToHost(_ context2.Context, req types.NamespacedName, vObj client.Object) types.NamespacedName {
 	return types.NamespacedName{
 		Name: n.nameTranslator(req.Name, vObj),
 	}
 }
 
-func (n *clusterTranslator) PhysicalToVirtual(ctx context2.Context, pObj client.Object) types.NamespacedName {
-	pAnnotations := pObj.GetAnnotations()
-	if pAnnotations != nil && pAnnotations[translate.NameAnnotation] != "" {
-		return types.NamespacedName{
-			Namespace: pAnnotations[translate.NamespaceAnnotation],
-			Name:      pAnnotations[translate.NameAnnotation],
+func (n *clusterTranslator) HostToVirtual(ctx context2.Context, req types.NamespacedName, pObj client.Object) types.NamespacedName {
+	if pObj != nil {
+		pAnnotations := pObj.GetAnnotations()
+		if pAnnotations != nil && pAnnotations[translate.NameAnnotation] != "" {
+			return types.NamespacedName{
+				Namespace: pAnnotations[translate.NamespaceAnnotation],
+				Name:      pAnnotations[translate.NameAnnotation],
+			}
 		}
 	}
 
 	vObj := n.obj.DeepCopyObject().(client.Object)
-	err := clienthelper.GetByIndex(ctx, n.virtualClient, vObj, constants.IndexByPhysicalName, pObj.GetName())
+	err := clienthelper.GetByIndex(ctx, n.virtualClient, vObj, constants.IndexByPhysicalName, req.Name)
 	if err != nil {
 		return types.NamespacedName{}
 	}
@@ -71,7 +73,7 @@ func (n *clusterTranslator) PhysicalToVirtual(ctx context2.Context, pObj client.
 	}
 }
 
-func (n *clusterTranslator) TranslateMetadata(ctx context2.Context, vObj client.Object) client.Object {
+func (n *clusterTranslator) TranslateMetadata(_ context2.Context, vObj client.Object) client.Object {
 	pObj, err := translate.Default.SetupMetadataWithName(vObj, n.nameTranslator)
 	if err != nil {
 		return nil
@@ -82,7 +84,7 @@ func (n *clusterTranslator) TranslateMetadata(ctx context2.Context, vObj client.
 	return pObj
 }
 
-func (n *clusterTranslator) TranslateMetadataUpdate(ctx context2.Context, vObj client.Object, pObj client.Object) (changed bool, annotations map[string]string, labels map[string]string) {
+func (n *clusterTranslator) TranslateMetadataUpdate(_ context2.Context, vObj client.Object, pObj client.Object) (changed bool, annotations map[string]string, labels map[string]string) {
 	updatedAnnotations := n.TranslateAnnotations(vObj, pObj)
 	updatedLabels := n.TranslateLabels(vObj, pObj)
 	return !equality.Semantic.DeepEqual(updatedAnnotations, pObj.GetAnnotations()) || !equality.Semantic.DeepEqual(updatedLabels, pObj.GetLabels()), updatedAnnotations, updatedLabels
