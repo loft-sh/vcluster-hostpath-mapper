@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ghodss/yaml"
 	"github.com/loft-sh/vcluster/config"
+	"sigs.k8s.io/yaml"
 )
 
 func MigrateLegacyConfig(distro, oldValues string) (string, error) {
@@ -41,7 +41,7 @@ func MigrateLegacyConfig(distro, oldValues string) (string, error) {
 func migrateK8sAndEKS(distro, oldValues string, newConfig *config.Config) error {
 	// unmarshal legacy config
 	oldConfig := &LegacyK8s{}
-	err := yaml.Unmarshal([]byte(oldValues), oldConfig)
+	err := oldConfig.UnmarshalYAMLStrict([]byte(oldValues))
 	if err != nil {
 		return fmt.Errorf("unmarshal legacy config: %w", err)
 	}
@@ -97,7 +97,7 @@ func migrateK8sAndEKS(distro, oldValues string, newConfig *config.Config) error 
 func migrateK3sAndK0s(distro, oldValues string, newConfig *config.Config) error {
 	// unmarshal legacy config
 	oldConfig := &LegacyK0sAndK3s{}
-	err := yaml.Unmarshal([]byte(oldValues), oldConfig)
+	err := oldConfig.UnmarshalYAMLStrict([]byte(oldValues))
 	if err != nil {
 		return fmt.Errorf("unmarshal legacy config: %w", err)
 	}
@@ -238,14 +238,14 @@ func convertBaseValues(oldConfig BaseHelm, newConfig *config.Config) error {
 	newConfig.Pro = oldConfig.Pro
 	if strings.Contains(oldConfig.ProLicenseSecret, "/") {
 		splitted := strings.Split(oldConfig.ProLicenseSecret, "/")
-		newConfig.Platform.APIKey.SecretRef.Namespace = splitted[0]
-		newConfig.Platform.APIKey.SecretRef.Name = splitted[1]
+		newConfig.Platform.API.SecretRef.Namespace = splitted[0]
+		newConfig.Platform.API.SecretRef.Name = splitted[1]
 	} else {
-		newConfig.Platform.APIKey.SecretRef.Name = oldConfig.ProLicenseSecret
+		newConfig.Platform.API.SecretRef.Name = oldConfig.ProLicenseSecret
 	}
 
 	newConfig.Experimental.IsolatedControlPlane.Headless = oldConfig.Headless
-	newConfig.ControlPlane.Advanced.DefaultImageRegistry = oldConfig.DefaultImageRegistry
+	newConfig.ControlPlane.Advanced.DefaultImageRegistry = strings.TrimSuffix(oldConfig.DefaultImageRegistry, "/")
 
 	if len(oldConfig.Plugin) > 0 {
 		err := convertObject(oldConfig.Plugin, &newConfig.Plugin)
@@ -529,6 +529,8 @@ func convertBaseValues(oldConfig BaseHelm, newConfig *config.Config) error {
 	}
 
 	// sync
+
+	// enable additional controllers required for scheduling with storage
 	if oldConfig.Sync.Services.Enabled != nil {
 		newConfig.Sync.ToHost.Services.Enabled = *oldConfig.Sync.Services.Enabled
 	}
@@ -558,6 +560,9 @@ func convertBaseValues(oldConfig BaseHelm, newConfig *config.Config) error {
 	}
 	if oldConfig.Sync.Ingresses.Enabled != nil {
 		newConfig.Sync.ToHost.Ingresses.Enabled = *oldConfig.Sync.Ingresses.Enabled
+		if *oldConfig.Sync.Ingresses.Enabled {
+			newConfig.Sync.FromHost.IngressClasses.Enabled = true
+		}
 	}
 	if oldConfig.Sync.Ingressclasses.Enabled != nil {
 		newConfig.Sync.FromHost.IngressClasses.Enabled = *oldConfig.Sync.Ingressclasses.Enabled
@@ -593,7 +598,7 @@ func convertBaseValues(oldConfig BaseHelm, newConfig *config.Config) error {
 		newConfig.Sync.ToHost.StorageClasses.Enabled = *oldConfig.Sync.StorageClasses.Enabled
 	}
 	if oldConfig.Sync.Hoststorageclasses.Enabled != nil {
-		newConfig.Sync.FromHost.StorageClasses.Enabled = *oldConfig.Sync.Hoststorageclasses.Enabled
+		newConfig.Sync.FromHost.StorageClasses.Enabled = config.StrBool(strconv.FormatBool(*oldConfig.Sync.Hoststorageclasses.Enabled))
 	}
 	if oldConfig.Sync.Priorityclasses.Enabled != nil {
 		newConfig.Sync.ToHost.PriorityClasses.Enabled = *oldConfig.Sync.Priorityclasses.Enabled
@@ -609,6 +614,15 @@ func convertBaseValues(oldConfig BaseHelm, newConfig *config.Config) error {
 	}
 	if oldConfig.Sync.Serviceaccounts.Enabled != nil {
 		newConfig.Sync.ToHost.ServiceAccounts.Enabled = *oldConfig.Sync.Serviceaccounts.Enabled
+	}
+	if oldConfig.Sync.CSINodes.Enabled != nil {
+		newConfig.Sync.FromHost.CSINodes.Enabled = config.StrBool(strconv.FormatBool(*oldConfig.Sync.CSINodes.Enabled))
+	}
+	if oldConfig.Sync.CSIStorageCapacities.Enabled != nil {
+		newConfig.Sync.FromHost.CSIStorageCapacities.Enabled = config.StrBool(strconv.FormatBool(*oldConfig.Sync.CSIStorageCapacities.Enabled))
+	}
+	if oldConfig.Sync.CSIDrivers.Enabled != nil {
+		newConfig.Sync.FromHost.CSIDrivers.Enabled = config.StrBool(strconv.FormatBool(*oldConfig.Sync.CSIDrivers.Enabled))
 	}
 	if oldConfig.Sync.Generic.Config != "" {
 		genericSyncConfig := &config.ExperimentalGenericSync{}
@@ -658,7 +672,7 @@ func convertK8sSyncerConfig(oldConfig K8sSyncerValues, newConfig *config.Config)
 }
 
 func convertSyncerConfig(oldConfig SyncerValues, newConfig *config.Config) error {
-	convertImage(oldConfig.Image, &newConfig.ControlPlane.StatefulSet.Image)
+	convertStatefulSetImage(oldConfig.Image, &newConfig.ControlPlane.StatefulSet.Image)
 	if oldConfig.ImagePullPolicy != "" {
 		newConfig.ControlPlane.StatefulSet.ImagePullPolicy = oldConfig.ImagePullPolicy
 	}
@@ -910,7 +924,7 @@ func migrateFlag(key, value string, newConfig *config.Config) error {
 			return fmt.Errorf("value is missing")
 		}
 
-		newConfig.Sync.ToHost.Pods.RewriteHosts.InitContainerImage = value
+		newConfig.Sync.ToHost.Pods.RewriteHosts.InitContainer.Image = value
 	case "cluster-domain":
 		if value == "" {
 			return fmt.Errorf("value is missing")
@@ -1054,18 +1068,20 @@ func convertVClusterConfig(oldConfig VClusterValues, retDistroCommon *config.Dis
 	return nil
 }
 
+func convertStatefulSetImage(image string, into *config.StatefulSetImage) {
+	if image == "" {
+		return
+	}
+
+	into.Registry, into.Repository, into.Tag = config.SplitImage(image)
+}
+
 func convertImage(image string, into *config.Image) {
 	if image == "" {
 		return
 	}
 
-	imageSplitted := strings.Split(image, ":")
-	if len(imageSplitted) == 1 {
-		return
-	}
-
-	into.Repository = strings.Join(imageSplitted[:len(imageSplitted)-1], ":")
-	into.Tag = imageSplitted[len(imageSplitted)-1]
+	into.Registry, into.Repository, into.Tag = config.SplitImage(image)
 }
 
 func mergeIntoMap(retMap map[string]string, arr []string) map[string]string {
