@@ -14,7 +14,7 @@ import (
 	"github.com/loft-sh/vcluster/pkg/util/clienthelper"
 
 	"github.com/loft-sh/vcluster/config"
-	"github.com/loft-sh/vcluster/pkg/config/legacyconfig"
+	"github.com/loft-sh/vcluster/config/legacyconfig"
 	"github.com/loft-sh/vcluster/pkg/util/blockingcacheclient"
 	"github.com/loft-sh/vcluster/pkg/util/pluginhookclient"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
