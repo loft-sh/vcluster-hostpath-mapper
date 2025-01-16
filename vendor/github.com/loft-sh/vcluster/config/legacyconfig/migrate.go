@@ -43,6 +43,9 @@ func migrateK8sAndEKS(oldValues string, newConfig *config.Config) error {
 	oldConfig := &LegacyK8s{}
 	err := oldConfig.UnmarshalYAMLStrict([]byte(oldValues))
 	if err != nil {
+		if err := errIfConfigIsAlreadyConverted(oldValues); err != nil {
+			return err
+		}
 		return fmt.Errorf("unmarshal legacy config: %w", err)
 	}
 
@@ -91,6 +94,9 @@ func migrateK3sAndK0s(distro, oldValues string, newConfig *config.Config) error 
 	oldConfig := &LegacyK0sAndK3s{}
 	err := oldConfig.UnmarshalYAMLStrict([]byte(oldValues))
 	if err != nil {
+		if err := errIfConfigIsAlreadyConverted(oldValues); err != nil {
+			return err
+		}
 		return fmt.Errorf("unmarshal legacy config: %w", err)
 	}
 
@@ -136,11 +142,18 @@ func migrateK3sAndK0s(distro, oldValues string, newConfig *config.Config) error 
 	return convertBaseValues(oldConfig.BaseHelm, newConfig)
 }
 
+func errIfConfigIsAlreadyConverted(oldValues string) error {
+	currentConfig := &config.Config{}
+	if err := currentConfig.UnmarshalYAMLStrict([]byte(oldValues)); err == nil {
+		return fmt.Errorf("config is already in correct format")
+	}
+	return nil
+}
+
 func convertEtcd(oldConfig EtcdValues, newConfig *config.Config) error {
 	if oldConfig.Disabled {
 		newConfig.ControlPlane.BackingStore.Etcd.Deploy.StatefulSet.Enabled = false
 		newConfig.ControlPlane.BackingStore.Etcd.Deploy.Service.Enabled = false
-		newConfig.ControlPlane.BackingStore.Etcd.Deploy.HeadlessService.Enabled = false
 	}
 	if oldConfig.ImagePullPolicy != "" {
 		newConfig.ControlPlane.BackingStore.Etcd.Deploy.StatefulSet.ImagePullPolicy = oldConfig.ImagePullPolicy
@@ -261,13 +274,14 @@ func convertBaseValues(oldConfig BaseHelm, newConfig *config.Config) error {
 	}
 
 	newConfig.Networking.Advanced.FallbackHostCluster = oldConfig.FallbackHostDNS
+
 	newConfig.ControlPlane.StatefulSet.Labels = oldConfig.Labels
 	newConfig.ControlPlane.StatefulSet.Annotations = oldConfig.Annotations
 	newConfig.ControlPlane.StatefulSet.Pods.Labels = oldConfig.PodLabels
 	newConfig.ControlPlane.StatefulSet.Pods.Annotations = oldConfig.PodAnnotations
 	newConfig.ControlPlane.StatefulSet.Scheduling.Tolerations = oldConfig.Tolerations
 	newConfig.ControlPlane.StatefulSet.Scheduling.NodeSelector = oldConfig.NodeSelector
-	newConfig.ControlPlane.StatefulSet.Scheduling.Affinity = oldConfig.Affinity
+	newConfig.ControlPlane.StatefulSet.Scheduling.Affinity = mergeMaps(newConfig.ControlPlane.StatefulSet.Scheduling.Affinity, oldConfig.Affinity)
 	newConfig.ControlPlane.StatefulSet.Scheduling.PriorityClassName = oldConfig.PriorityClassName
 
 	newConfig.Networking.ReplicateServices.FromHost = oldConfig.MapServices.FromHost
@@ -978,11 +992,6 @@ func migrateFlag(key, value string, newConfig *config.Config) error {
 		return fmt.Errorf("shouldn't be used directly, use isolation.podSecurityStandard instead")
 	case "plugins":
 		return fmt.Errorf("shouldn't be used directly")
-	case "sync-labels":
-		if value == "" {
-			return fmt.Errorf("value is missing")
-		}
-		newConfig.Experimental.SyncSettings.SyncLabels = append(newConfig.Experimental.SyncSettings.SyncLabels, strings.Split(value, ",")...)
 	case "map-virtual-service":
 		return fmt.Errorf("shouldn't be used directly")
 	case "map-host-service":

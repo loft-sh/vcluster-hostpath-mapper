@@ -41,7 +41,9 @@ deployments:
         hostpathMapper:
           dev: true
           image: ${IMAGE}
-        VclusterReleaseName: my-vcluster
+        VclusterReleaseName: testcluster
+        serviceAccount: 
+          name: vc-testcluster
 
 # This is a list of `dev` containers that are based on the containers created by your deployments
 dev:

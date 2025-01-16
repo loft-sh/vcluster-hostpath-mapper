@@ -405,7 +405,7 @@ func mapHostPaths(ctx context.Context, pManager, vManager manager.Manager) error
 
 		for _, vPod := range vPodList.Items {
 			existingVPodsWithNamespace[fmt.Sprintf("%s_%s", vPod.Name, vPod.Namespace)] = true
-			pName := translate.Default.PhysicalName(vPod.Name, vPod.Namespace)
+			pName := translate.Default.HostName(nil, vPod.Name, vPod.Namespace).Name
 
 			if podDetail, ok := podMappings[pName]; ok {
 				// create pod log symlink
