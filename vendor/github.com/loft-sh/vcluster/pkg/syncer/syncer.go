@@ -37,7 +37,7 @@ func NewSyncController(ctx *synccontext.RegisterContext, syncer syncertypes.Sync
 
 	var objectCache *synccontext.BidirectionalObjectCache
 	if options.ObjectCaching {
-		objectCache = synccontext.NewBidirectionalObjectCache(syncer.Resource().DeepCopyObject().(client.Object))
+		objectCache = synccontext.NewBidirectionalObjectCache(syncer.Resource().DeepCopyObject().(client.Object), syncer)
 	}
 
 	return &SyncController{
@@ -66,6 +66,16 @@ func NewSyncController(ctx *synccontext.RegisterContext, syncer syncertypes.Sync
 }
 
 func RegisterSyncer(ctx *synccontext.RegisterContext, syncer syncertypes.Syncer) error {
+	customManagerProvider, ok := syncer.(syncertypes.ManagerProvider)
+	if ok {
+		// if syncer needs a custom physical manager, ctx.PhysicalManager will get exchanged here
+		var err error
+		ctx, err = customManagerProvider.ConfigureAndStartManager(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
 	controller, err := NewSyncController(ctx, syncer)
 	if err != nil {
 		return err
@@ -101,7 +111,7 @@ type SyncController struct {
 }
 
 func (r *SyncController) newSyncContext(ctx context.Context, logName string) *synccontext.SyncContext {
-	return &synccontext.SyncContext{
+	syncCtx := &synccontext.SyncContext{
 		Context:                ctx,
 		Config:                 r.config,
 		Log:                    loghelper.NewFromExisting(r.log.Base(), logName),
@@ -112,6 +122,7 @@ func (r *SyncController) newSyncContext(ctx context.Context, logName string) *sy
 		VirtualClient:          r.virtualClient,
 		Mappings:               r.mappings,
 	}
+	return syncCtx
 }
 
 func (r *SyncController) Reconcile(ctx context.Context, vReq reconcile.Request) (res ctrl.Result, retErr error) {
@@ -132,6 +143,12 @@ func (r *SyncController) Reconcile(ctx context.Context, vReq reconcile.Request) 
 		if err := syncContext.Close(); err != nil {
 			retErr = errors.Join(retErr, err)
 		}
+	}()
+
+	// debug log request
+	klog.FromContext(ctx).V(1).Info("Reconcile started")
+	defer func() {
+		klog.FromContext(ctx).V(1).Info("Reconcile ended")
 	}()
 
 	// check if we should skip reconcile
@@ -272,6 +289,7 @@ func (r *SyncController) getObjects(ctx *synccontext.SyncContext, vReq, pReq ctr
 			// from virtual to host correctly.
 			vObjOld = vObj.DeepCopyObject().(client.Object)
 			vObjOld.SetLabels(nil)
+			vObjOld.SetResourceVersion("1")
 
 			// only add to cache if it's not deleting
 			if vObj.GetDeletionTimestamp() == nil {
