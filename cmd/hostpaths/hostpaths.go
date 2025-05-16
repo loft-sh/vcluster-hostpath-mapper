@@ -262,9 +262,10 @@ func getVclusterConfigFromSecret(ctx context.Context, kubeClient kubernetes.Inte
 		return nil, fmt.Errorf("key '%s' not found in secret", configFilename)
 	}
 
-	// create a new strict decoder
+	// Use regular Unmarshal instead of UnmarshalStrict to allow for forward compatibility
+	// with newer config fields that might not be defined in the current Config struct
 	rawConfig := &config.Config{}
-	err = yaml.UnmarshalStrict(rawBytes, rawConfig)
+	err = yaml.Unmarshal(rawBytes, rawConfig)
 	if err != nil {
 		klog.Errorf("unmarshal %s: %#+v", configFilename, errors.Unwrap(err))
 		return nil, err
