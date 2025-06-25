@@ -270,24 +270,24 @@ github.com/kylelemons/godebug/diff
 # github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
 ## explicit
 github.com/liggitt/tabwriter
-# github.com/loft-sh/admin-apis v0.0.0-20240203010124-3600c1c582a8
+# github.com/loft-sh/admin-apis v0.0.0-20250429193833-4e0a455c33dd
 ## explicit; go 1.21.1
 github.com/loft-sh/admin-apis/pkg/licenseapi
-# github.com/loft-sh/agentapi/v4 v4.0.0-alpha.6.0.20240614131646-3359da6a4818
-## explicit; go 1.22.4
+# github.com/loft-sh/agentapi/v4 v4.3.0-alpha.39
+## explicit; go 1.23.1
 github.com/loft-sh/agentapi/v4/pkg/apis/loft/cluster
 github.com/loft-sh/agentapi/v4/pkg/apis/loft/cluster/v1
 github.com/loft-sh/agentapi/v4/pkg/apis/loft/storage/v1
-# github.com/loft-sh/api/v4 v4.0.0-alpha.6.0.20240614134907-f9ecc1668e9e
-## explicit; go 1.22.4
+# github.com/loft-sh/api/v4 v4.3.0-alpha.32
+## explicit; go 1.23.1
 github.com/loft-sh/api/v4/pkg/apis/audit/v1
 github.com/loft-sh/api/v4/pkg/apis/management
 github.com/loft-sh/api/v4/pkg/apis/management/v1
 github.com/loft-sh/api/v4/pkg/apis/storage/v1
 github.com/loft-sh/api/v4/pkg/apis/ui/v1
 github.com/loft-sh/api/v4/pkg/managerfactory
-# github.com/loft-sh/apiserver v0.0.0-20240607231110-634aeeab2b36
-## explicit; go 1.22.4
+# github.com/loft-sh/apiserver v0.0.0-20250206205835-422f1d472459
+## explicit; go 1.23.1
 github.com/loft-sh/apiserver/pkg/builders
 # github.com/loft-sh/log v0.0.0-20240219160058-26d83ffb46ac
 ## explicit; go 1.20
@@ -296,7 +296,7 @@ github.com/loft-sh/log/hash
 github.com/loft-sh/log/scanner
 github.com/loft-sh/log/survey
 github.com/loft-sh/log/terminal
-# github.com/loft-sh/vcluster v0.25.0
+# github.com/loft-sh/vcluster v0.26.0
 ## explicit; go 1.24
 github.com/loft-sh/vcluster/config
 github.com/loft-sh/vcluster/config/legacyconfig
@@ -304,6 +304,7 @@ github.com/loft-sh/vcluster/pkg/apis
 github.com/loft-sh/vcluster/pkg/config
 github.com/loft-sh/vcluster/pkg/constants
 github.com/loft-sh/vcluster/pkg/controllers/resources/namespaces
+github.com/loft-sh/vcluster/pkg/controllers/resources/pods/scheduling
 github.com/loft-sh/vcluster/pkg/controllers/resources/pods/token
 github.com/loft-sh/vcluster/pkg/controllers/resources/pods/translate
 github.com/loft-sh/vcluster/pkg/coredns
@@ -332,6 +333,7 @@ github.com/loft-sh/vcluster/pkg/util/clienthelper
 github.com/loft-sh/vcluster/pkg/util/kubeconfig
 github.com/loft-sh/vcluster/pkg/util/log
 github.com/loft-sh/vcluster/pkg/util/loghelper
+github.com/loft-sh/vcluster/pkg/util/namespaces
 github.com/loft-sh/vcluster/pkg/util/patch
 github.com/loft-sh/vcluster/pkg/util/pluginhookclient
 github.com/loft-sh/vcluster/pkg/util/random
@@ -396,7 +398,7 @@ github.com/peterbourgon/diskv
 # github.com/pkg/errors v0.9.1
 ## explicit
 github.com/pkg/errors
-# github.com/prometheus/client_golang v1.20.4
+# github.com/prometheus/client_golang v1.20.5
 ## explicit; go 1.20
 github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil
 github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil/header
@@ -582,7 +584,7 @@ golang.org/x/crypto/openpgp/elgamal
 golang.org/x/crypto/openpgp/errors
 golang.org/x/crypto/openpgp/packet
 golang.org/x/crypto/openpgp/s2k
-# golang.org/x/exp v0.0.0-20241004190924-225e2abe05e6
+# golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8
 ## explicit; go 1.22.0
 golang.org/x/exp/constraints
 golang.org/x/exp/slices
@@ -647,7 +649,7 @@ golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
 golang.org/x/text/width
-# golang.org/x/time v0.7.0
+# golang.org/x/time v0.9.0
 ## explicit; go 1.18
 golang.org/x/time/rate
 # gomodules.xyz/jsonpatch/v2 v2.4.0
