@@ -264,7 +264,7 @@ func getVclusterConfigFromSecret(ctx context.Context, kubeClient kubernetes.Inte
 
 	// create a new strict decoder
 	rawConfig := &config.Config{}
-	err = yaml.UnmarshalStrict(rawBytes, rawConfig)
+	err = yaml.Unmarshal(rawBytes, rawConfig)
 	if err != nil {
 		klog.Errorf("unmarshal %s: %#+v", configFilename, errors.Unwrap(err))
 		return nil, err
