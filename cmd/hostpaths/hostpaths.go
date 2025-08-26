@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/loft-sh/vcluster/pkg/controllers/resources/namespaces"
 	podtranslate "github.com/loft-sh/vcluster/pkg/controllers/resources/pods/translate"
 	"github.com/loft-sh/vcluster/pkg/util/clienthelper"
 
@@ -24,7 +23,6 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -59,8 +57,7 @@ const (
 	// naming format <pod_name>_<namespace>_<container_name>-<containerdID(hash, with <docker/cri>:// prefix removed)>.log
 	ContainerSymlinkSourceTemplate = "%s_%s_%s-%s.log"
 
-	MultiNamespaceMode = "multi-namespace-mode"
-	SyncerContainer    = "syncer"
+	SyncerContainer = "syncer"
 
 	optionsKey key = iota
 
@@ -191,7 +188,15 @@ func Start(ctx context.Context, options *VirtualClusterOptions, init bool) error
 		return fmt.Errorf("find vcluster mode: %w", err)
 	}
 
-	localManager, err := ctrl.NewManager(inClusterConfig, localManagerCtrlOptions(options))
+	localManager, err := ctrl.NewManager(inClusterConfig, ctrl.Options{
+		Scheme:         scheme,
+		Metrics:        metricsserver.Options{BindAddress: "0"},
+		LeaderElection: false,
+		NewClient:      pluginhookclient.NewPhysicalPluginClientFactory(blockingcacheclient.NewCacheClient),
+		Cache: cache.Options{
+			DefaultNamespaces: map[string]cache.Config{options.TargetNamespace: {}},
+		},
+	})
 	if err != nil {
 		return err
 	}
@@ -228,29 +233,6 @@ func Start(ctx context.Context, options *VirtualClusterOptions, init bool) error
 	return mapHostPaths(ctx, localManager, virtualClusterManager)
 }
 
-func getSyncerPodSpec(ctx context.Context, kubeClient kubernetes.Interface, vclusterName, vclusterNamespace string) (*corev1.PodSpec, error) {
-	// try looking for the stateful set first
-
-	vclusterSts, err := kubeClient.AppsV1().StatefulSets(vclusterNamespace).Get(ctx, vclusterName, metav1.GetOptions{})
-	if kerrors.IsNotFound(err) {
-		// try looking for deployment - in case of eks/k8s
-		vclusterDeploy, err := kubeClient.AppsV1().Deployments(vclusterNamespace).Get(ctx, vclusterName, metav1.GetOptions{})
-		if kerrors.IsNotFound(err) {
-			klog.Errorf("could not find vcluster either in statefulset or deployment: %v", err)
-			return nil, err
-		} else if err != nil {
-			klog.Errorf("error looking for vcluster deployment: %v", err)
-			return nil, err
-		}
-
-		return &vclusterDeploy.Spec.Template.Spec, nil
-	} else if err != nil {
-		return nil, err
-	}
-
-	return &vclusterSts.Spec.Template.Spec, nil
-}
-
 func getVclusterConfigFromSecret(ctx context.Context, kubeClient kubernetes.Interface, vclusterName, vclusterNamespace string) (*config.Config, error) {
 	configSecret, err := kubeClient.CoreV1().Secrets(vclusterNamespace).Get(ctx, fmt.Sprintf(configSecretNameTemplate, vclusterName), metav1.GetOptions{})
 	if err != nil {
@@ -273,50 +255,12 @@ func getVclusterConfigFromSecret(ctx context.Context, kubeClient kubernetes.Inte
 	return rawConfig, nil
 }
 
-func setMultiNamespaceMode(options *VirtualClusterOptions) {
-	options.MultiNamespaceMode = true
-	translate.Default = translate.NewMultiNamespaceTranslator(options.TargetNamespace)
-}
-
-func localManagerCtrlOptions(options *VirtualClusterOptions) manager.Options {
-	controllerOptions := ctrl.Options{
-		Scheme:         scheme,
-		Metrics:        metricsserver.Options{BindAddress: "0"},
-		LeaderElection: false,
-		NewClient:      pluginhookclient.NewPhysicalPluginClientFactory(blockingcacheclient.NewCacheClient),
-	}
-
-	if !options.MultiNamespaceMode {
-		controllerOptions.Cache.DefaultNamespaces = map[string]cache.Config{options.TargetNamespace: {}}
-	}
-
-	return controllerOptions
-}
-
 func findVclusterModeAndSetDefaultTranslation(ctx context.Context, kubeClient kubernetes.Interface, options *VirtualClusterOptions) error {
 	vClusterConfig, err := getVclusterConfigFromSecret(ctx, kubeClient, options.Name, options.TargetNamespace)
 	if err != nil && !kerrors.IsNotFound(err) {
 		return err
-	} else if vClusterConfig != nil && vClusterConfig.Experimental.MultiNamespaceMode.Enabled {
-		setMultiNamespaceMode(options)
-		return nil
-	}
-
-	vclusterPodSpec, err := getSyncerPodSpec(ctx, kubeClient, options.Name, options.TargetNamespace)
-	if err != nil {
-		return err
-	}
-
-	for _, container := range vclusterPodSpec.Containers {
-		if container.Name == SyncerContainer {
-			// iterate over command args
-			for _, arg := range container.Args {
-				if strings.Contains(arg, MultiNamespaceMode) {
-					setMultiNamespaceMode(options)
-					return nil
-				}
-			}
-		}
+	} else if vClusterConfig != nil && vClusterConfig.Sync.ToHost.Namespaces.Enabled {
+		return fmt.Errorf("unsupported vCluster config. Hostpathmapper is not compatible with toHost namespace syncing (sync.toHost.namespaces)")
 	}
 
 	translate.Default = translate.NewSingleNamespaceTranslator(options.TargetNamespace)
@@ -475,10 +419,7 @@ func getPhysicalPodMap(ctx context.Context, options *VirtualClusterOptions, pMan
 		FieldSelector: fields.SelectorFromSet(fields.Set{
 			NodeIndexName: os.Getenv(HostpathMapperSelfNodeNameEnvVar),
 		}),
-	}
-
-	if !options.MultiNamespaceMode {
-		podListOptions.Namespace = options.TargetNamespace
+		Namespace: options.TargetNamespace,
 	}
 
 	podList := &corev1.PodList{}
@@ -487,32 +428,8 @@ func getPhysicalPodMap(ctx context.Context, options *VirtualClusterOptions, pMan
 		return nil, fmt.Errorf("unable to list pods: %w", err)
 	}
 
-	var pods []corev1.Pod
-	if options.MultiNamespaceMode {
-		// find namespaces managed by the current vcluster
-		nsList := &corev1.NamespaceList{}
-		err = pManager.GetClient().List(ctx, nsList, &client.ListOptions{
-			LabelSelector: labels.SelectorFromSet(labels.Set{
-				namespaces.VClusterNamespaceAnnotation: options.TargetNamespace,
-			}),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("unable to list namespaces: %w", err)
-		}
-
-		vclusterNamespaces := make(map[string]struct{}, len(nsList.Items))
-		for _, ns := range nsList.Items {
-			vclusterNamespaces[ns.Name] = struct{}{}
-		}
-
-		// Limit Pods
-		pods = filter(ctx, podList.Items, vclusterNamespaces)
-	} else {
-		pods = podList.Items
-	}
-
-	podMappings := make(PhysicalPodMap, len(pods))
-	for _, pPod := range pods {
+	podMappings := make(PhysicalPodMap, len(podList.Items))
+	for _, pPod := range podList.Items {
 		lookupName := fmt.Sprintf("%s_%s_%s", pPod.Namespace, pPod.Name, pPod.UID)
 
 		ok, err := checkIfPathExists(lookupName)

@@ -8,7 +8,6 @@ import (
 const (
 	K3SDistro = "k3s"
 	K8SDistro = "k8s"
-	K0SDistro = "k0s"
 	Unknown   = "unknown"
 )
 
@@ -24,21 +23,14 @@ const (
 
 // K3SVersionMap holds the supported k3s versions
 var K3SVersionMap = map[string]string{
-	"1.32": "rancher/k3s:v1.32.1-k3s1",
+	"1.32": "rancher/k3s:v1.32.7-k3s1",
 	"1.31": "rancher/k3s:v1.31.1-k3s1",
 	"1.30": "rancher/k3s:v1.30.2-k3s1",
 }
 
-// K0SVersionMap holds the supported k0s versions
-var K0SVersionMap = map[string]string{
-	"1.32": "k0sproject/k0s:v1.30.2-k0s.0",
-	"1.31": "k0sproject/k0s:v1.30.2-k0s.0",
-	"1.30": "k0sproject/k0s:v1.30.2-k0s.0",
-}
-
 // K8SVersionMap holds the supported k8s api servers
 var K8SVersionMap = map[string]string{
-	"1.32": "ghcr.io/loft-sh/kubernetes:v1.32.1",
+	"1.32": "ghcr.io/loft-sh/kubernetes:v1.32.8",
 	"1.31": "ghcr.io/loft-sh/kubernetes:v1.31.1",
 	"1.30": "ghcr.io/loft-sh/kubernetes:v1.30.2",
 }
@@ -145,8 +137,6 @@ func addCommonReleaseValues(config *Config, options *ExtraValuesOptions) {
 		switch options.Distro {
 		case K3SDistro:
 			config.ControlPlane.Distro.K3S.Enabled = true
-		case K0SDistro:
-			config.ControlPlane.Distro.K0S.Enabled = true
 		case K8SDistro:
 		}
 	}
