@@ -7,9 +7,9 @@ To deploy this component, its basically a 2 step process
 
 You would want to create the vcluster with the following `values.yaml`:
 ```
-syncer:
-  extraArgs:
-    - --mount-physical-host-paths=true
+controlPlane:
+  hostPathMapper:
+    enabled: true
 ```
 
 * For new vcluster run `vcluster create <vcluster_name> -f values.yaml`
@@ -24,8 +24,7 @@ Now that the vcluster itself is ready, we can deploy the hostpath mapper compone
 To sum up, if your vcluster is named `my-vcluster` and is deployed in namespace `my-namespace` then you should run
 ```shell
 helm install vcluster-hpm vcluster-hpm \
-    --devel \                         # since we currently only have a beta release
-    --repo https://charts.loft.sh \   # once we publish a GA chart this would not be needed
+    --repo https://charts.loft.sh \ 
     -n my-namespace \
     --set VclusterReleaseName=my-vcluster
 ```
