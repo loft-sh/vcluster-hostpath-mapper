@@ -6,7 +6,7 @@ toolchain go1.24.2
 
 require (
 	github.com/go-openapi/loads v0.22.0
-	github.com/loft-sh/vcluster v0.28.0
+	github.com/loft-sh/vcluster v0.29.1
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v1.9.1
 	gotest.tools v2.2.0+incompatible
@@ -86,10 +86,10 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/k0kubun/go-ansi v0.0.0-20180517002512-3bf9e2903213 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
-	github.com/kubernetes-csi/external-snapshotter/client/v4 v4.2.0 // indirect
+	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.2.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de // indirect
-	github.com/loft-sh/admin-apis v0.0.0-20250825172409-daa49fc5396e // indirect
+	github.com/loft-sh/admin-apis v0.0.0-20250923191853-0998210fade9 // indirect
 	github.com/loft-sh/agentapi/v4 v4.4.0-alpha.29 // indirect
 	github.com/loft-sh/api/v4 v4.4.0-alpha.29 // indirect
 	github.com/loft-sh/apiserver v0.0.0-20250704091321-0966a6ee77b2 // indirect
@@ -124,7 +124,7 @@ require (
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect
 	github.com/tcnksm/go-gitconfig v0.1.2 // indirect
-	github.com/ulikunitz/xz v0.5.12 // indirect
+	github.com/ulikunitz/xz v0.5.14 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
