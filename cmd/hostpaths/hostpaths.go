@@ -12,11 +12,11 @@ import (
 	podtranslate "github.com/loft-sh/vcluster/pkg/controllers/resources/pods/translate"
 	"github.com/loft-sh/vcluster/pkg/util/clienthelper"
 
-	"github.com/loft-sh/vcluster/config"
 	"github.com/loft-sh/vcluster/config/legacyconfig"
 	"github.com/loft-sh/vcluster/pkg/util/blockingcacheclient"
 	"github.com/loft-sh/vcluster/pkg/util/pluginhookclient"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
+	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
@@ -65,6 +65,18 @@ const (
 	configSecretNameTemplate = "vc-config-%s"
 	configFilename           = "config.yaml"
 )
+
+// The Config type from the vcluster module may change between versions.
+// By defining our own type, we avoid parsing issues with incompatible vCluster versions.
+type vclusterConfig struct {
+	Sync struct {
+		ToHost struct {
+			Namespaces struct {
+				Enabled bool `mapstructure:"enabled"`
+			} `mapstructure:"namespaces"`
+		} `mapstructure:"toHost"`
+	} `mapstructure:"sync"`
+}
 
 // map of physical pod names to the corresponding virtual pod
 type PhysicalPodMap map[string]*PodDetail
@@ -233,7 +245,7 @@ func Start(ctx context.Context, options *VirtualClusterOptions, init bool) error
 	return mapHostPaths(ctx, localManager, virtualClusterManager)
 }
 
-func getVclusterConfigFromSecret(ctx context.Context, kubeClient kubernetes.Interface, vclusterName, vclusterNamespace string) (*config.Config, error) {
+func getVclusterConfigFromSecret(ctx context.Context, kubeClient kubernetes.Interface, vclusterName, vclusterNamespace string) (*vclusterConfig, error) {
 	configSecret, err := kubeClient.CoreV1().Secrets(vclusterNamespace).Get(ctx, fmt.Sprintf(configSecretNameTemplate, vclusterName), metav1.GetOptions{})
 	if err != nil {
 		return nil, err
@@ -244,23 +256,31 @@ func getVclusterConfigFromSecret(ctx context.Context, kubeClient kubernetes.Inte
 		return nil, fmt.Errorf("key '%s' not found in secret", configFilename)
 	}
 
-	// create a new strict decoder
-	rawConfig := &config.Config{}
-	err = yaml.UnmarshalStrict(rawBytes, rawConfig)
+	var rawConfig map[string]any
+	err = yaml.Unmarshal(rawBytes, &rawConfig)
 	if err != nil {
 		klog.Errorf("unmarshal %s: %#+v", configFilename, errors.Unwrap(err))
-		return nil, err
+		return nil, fmt.Errorf("failed to parse vCluster config: %w", err)
 	}
 
-	return rawConfig, nil
+	var vClusterConfig vclusterConfig
+	err = mapstructure.Decode(rawConfig, &vClusterConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode config: %w", err)
+	}
+
+	return &vClusterConfig, nil
 }
 
 func findVclusterModeAndSetDefaultTranslation(ctx context.Context, kubeClient kubernetes.Interface, options *VirtualClusterOptions) error {
 	vClusterConfig, err := getVclusterConfigFromSecret(ctx, kubeClient, options.Name, options.TargetNamespace)
 	if err != nil && !kerrors.IsNotFound(err) {
 		return err
-	} else if vClusterConfig != nil && vClusterConfig.Sync.ToHost.Namespaces.Enabled {
-		return fmt.Errorf("unsupported vCluster config. Hostpathmapper is not compatible with toHost namespace syncing (sync.toHost.namespaces)")
+	}
+	if vClusterConfig != nil {
+		if vClusterConfig.Sync.ToHost.Namespaces.Enabled {
+			return fmt.Errorf("unsupported vCluster config. Hostpathmapper is not compatible with toHost namespace syncing (sync.toHost.namespaces)")
+		}
 	}
 
 	translate.Default = translate.NewSingleNamespaceTranslator(options.TargetNamespace)
