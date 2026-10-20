@@ -2,6 +2,8 @@ package hostpaths
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"gotest.tools/assert"
@@ -80,4 +82,49 @@ func Test_filter(t *testing.T) {
 			testCase.name,
 		)
 	}
+}
+
+func Test_cleanupOldPodPath_kubelet(t *testing.T) {
+	setup := func(t *testing.T) (context.Context, string, string, string) {
+		t.Helper()
+		root := t.TempDir()
+		physicalPodDir := filepath.Join(root, "physical", "physical-uid")
+		assert.NilError(t, os.MkdirAll(filepath.Join(physicalPodDir, "volumes"), 0o755))
+
+		kubeletPodsPath := filepath.Join(root, "virtual", "kubelet", "pods")
+		virtualPodDir := filepath.Join(kubeletPodsPath, "virtual-uid")
+		assert.NilError(t, os.MkdirAll(virtualPodDir, 0o755))
+		assert.NilError(t, os.Symlink(filepath.Join(physicalPodDir, "volumes"), filepath.Join(virtualPodDir, "volumes")))
+
+		ctx := context.WithValue(context.Background(), optionsKey, &VirtualClusterOptions{VirtualKubeletPodPath: kubeletPodsPath})
+		return ctx, kubeletPodsPath, virtualPodDir, physicalPodDir
+	}
+
+	exists := func(path string) bool {
+		_, err := os.Lstat(path)
+		return err == nil
+	}
+
+	t.Run("keeps the directory while the physical pod directory exists", func(t *testing.T) {
+		ctx, kubeletPodsPath, virtualPodDir, _ := setup(t)
+
+		assert.NilError(t, cleanupOldPodPath(ctx, kubeletPodsPath, map[string]bool{}))
+		assert.Assert(t, exists(filepath.Join(virtualPodDir, "volumes")))
+	})
+
+	t.Run("removes the symlinks and the directory once the physical pod directory is gone", func(t *testing.T) {
+		ctx, kubeletPodsPath, virtualPodDir, physicalPodDir := setup(t)
+		assert.NilError(t, os.RemoveAll(physicalPodDir))
+
+		assert.NilError(t, cleanupOldPodPath(ctx, kubeletPodsPath, map[string]bool{}))
+		assert.Assert(t, !exists(virtualPodDir))
+	})
+
+	t.Run("keeps the directory of a pod that still exists", func(t *testing.T) {
+		ctx, kubeletPodsPath, virtualPodDir, physicalPodDir := setup(t)
+		assert.NilError(t, os.RemoveAll(physicalPodDir))
+
+		assert.NilError(t, cleanupOldPodPath(ctx, kubeletPodsPath, map[string]bool{virtualPodDir: true}))
+		assert.Assert(t, exists(filepath.Join(virtualPodDir, "volumes")))
+	})
 }
