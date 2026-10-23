@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM golang:1.24.2 as builder
+FROM golang:1.26.10 as builder
 
 WORKDIR /vcluster-hpm-dev
 ARG TARGETOS
@@ -45,7 +45,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GO111MODULE=on go build 
 ENTRYPOINT ["go", "run", "-mod", "vendor", "cmd/main.go"]
 
 # we use alpine for easier debugging
-FROM alpine:3.18
+FROM alpine:3.24
 
 # Set root path as working directory
 WORKDIR /
