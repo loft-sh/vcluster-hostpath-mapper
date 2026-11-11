@@ -560,23 +560,7 @@ func cleanupOldPodPath(ctx context.Context, cleanupDirPath string, existingPodPa
 				// depend on it and we don't want to delete the virtual paths
 				// which the physical paths are still not cleaned up by the
 				// kubelet
-				symlinks, err := os.ReadDir(fullVPodDirDiskPath)
-				if err != nil {
-					klog.Errorf("error iterating over vpod dir %s: %v", fullVPodDirDiskPath, err)
-				}
-
-				for _, sl := range symlinks {
-					target := filepath.Join(fullVPodDirDiskPath, sl.Name())
-					_, readLinkErr := os.Readlink(target)
-					if readLinkErr != nil {
-						// symlink no longer resolves, hence delete
-						klog.Infof("cleaning up %s", target)
-						err := os.RemoveAll(target)
-						if err != nil {
-							klog.Errorf("error deleting symlink %s: %v", target, err)
-						}
-					}
-				}
+				cleanupKubeletPodDir(fullVPodDirDiskPath)
 				continue
 			}
 
@@ -592,6 +576,42 @@ func cleanupOldPodPath(ctx context.Context, cleanupDirPath string, existingPodPa
 	}
 
 	return nil
+}
+
+// cleanupKubeletPodDir removes the symlinks in a virtual kubelet pod directory whose
+// physical targets are gone, and the directory itself once it is empty.
+func cleanupKubeletPodDir(vPodDir string) {
+	symlinks, err := os.ReadDir(vPodDir)
+	if err != nil {
+		klog.Errorf("error iterating over vpod dir %s: %v", vPodDir, err)
+		return
+	}
+
+	for _, sl := range symlinks {
+		target := filepath.Join(vPodDir, sl.Name())
+		_, statErr := os.Stat(target)
+		if statErr == nil || !errors.Is(statErr, fs.ErrNotExist) {
+			continue
+		}
+
+		// symlink no longer resolves, hence delete
+		klog.Infof("cleaning up %s", target)
+		err := os.RemoveAll(target)
+		if err != nil {
+			klog.Errorf("error deleting symlink %s: %v", target, err)
+		}
+	}
+
+	remaining, err := os.ReadDir(vPodDir)
+	if err != nil || len(remaining) > 0 {
+		return
+	}
+
+	klog.Infof("cleaning up %s", vPodDir)
+	err = os.Remove(vPodDir)
+	if err != nil {
+		klog.Errorf("error deleting vpod dir %s: %v", vPodDir, err)
+	}
 }
 
 func createContainerToPodSymlink(ctx context.Context, vPod corev1.Pod, pPodDetail *PodDetail, targetDir string) error {
